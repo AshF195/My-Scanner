@@ -122,6 +122,11 @@ strict_mode = st.sidebar.checkbox(
     value=True
 )
 
+debug_mode = st.sidebar.checkbox(
+    "Debug Mode (show why stocks are filtered)",
+    value=False
+)
+
 # ---------------------------------------------------
 # LOAD TICKERS FROM ALL SELECTED MARKETS
 # ---------------------------------------------------
@@ -270,16 +275,32 @@ def calculate_metrics(ticker):
 
         # Strict Filters
         if strict_mode:
-            if macd_delta    < 0:                        return None
-            if rvol          < 1:                        return None
-            if trend_1m      < 0:                        return None
-            if trend_6m      < 0:                        return None
-            if ath_distance  < -35:                      return None
-            if rsi           > 85:                       return None
-            if bbpos         > 1.1 and macd_delta < 0:  return None
-            if bw_percentile > 95  and macd_delta < 0:  return None
-            if accel_z       > 4   and macd_delta < 0:  return None
-            if earnings_days <= 1:                       return None
+            filter_reason = None
+            if macd_delta < 0:
+                filter_reason = f"MACD delta negative ({macd_delta:.3f})"
+            elif rvol < 1:
+                filter_reason = f"RVOL too low ({rvol:.2f})"
+            elif trend_1m < 0:
+                filter_reason = f"1M trend negative ({trend_1m:.1f}%)"
+            elif trend_6m < 0:
+                filter_reason = f"6M trend negative ({trend_6m:.1f}%)"
+            elif ath_distance < -35:
+                filter_reason = f"Too far from ATH ({ath_distance:.1f}%)"
+            elif rsi > 85:
+                filter_reason = f"RSI too high ({rsi:.0f})"
+            elif bbpos > 1.1 and macd_delta < 0:
+                filter_reason = f"BBPos extended + MACD neg"
+            elif bw_percentile > 95 and macd_delta < 0:
+                filter_reason = f"BW climax + MACD neg"
+            elif accel_z > 4 and macd_delta < 0:
+                filter_reason = f"Accel exploding + MACD neg"
+            elif earnings_days <= 1:
+                filter_reason = f"Earnings too close ({earnings_days}d)"
+
+            if filter_reason:
+                if debug_mode:
+                    return {"_debug": True, "Ticker": ticker, "Filtered By": filter_reason}
+                return None
 
         # Labels
         def bbpos_label(x):
@@ -466,18 +487,47 @@ scan_button = st.button(
 
 if scan_button:
 
-    results  = []
-    progress = st.progress(0)
-    total    = len(unique_tickers)
+    results       = []
+    debug_results = []
+    progress      = st.progress(0)
+    total         = len(unique_tickers)
 
     for i, ticker in enumerate(unique_tickers):
         data = calculate_metrics(ticker)
         if data:
-            results.append(data)
+            if data.get("_debug"):
+                debug_results.append(data)
+            else:
+                results.append(data)
         progress.progress((i + 1) / total)
 
+    # ── Debug panel ──────────────────────────────────────────────
+    if debug_mode and debug_results:
+        st.subheader(f"Debug: {len(debug_results)} stocks filtered by strict mode")
+        debug_df = pd.DataFrame(debug_results).drop(columns=["_debug"])
+        # Tally filter reasons
+        tally = debug_df["Filtered By"].value_counts().reset_index()
+        tally.columns = ["Filter Reason", "Count"]
+        col_d1, col_d2 = st.columns([1, 2])
+        with col_d1:
+            st.markdown("**Filter reason breakdown**")
+            st.dataframe(tally, use_container_width=True, hide_index=True)
+        with col_d2:
+            st.markdown("**All filtered tickers**")
+            st.dataframe(debug_df, use_container_width=True, height=300, hide_index=True)
+        st.divider()
+
     if not results:
-        st.warning("No stocks matched filters.")
+        if debug_mode:
+            st.warning(
+                f"No stocks passed filters. See debug table above — "
+                f"{len(debug_results)} stocks were filtered out."
+            )
+        else:
+            st.warning(
+                "No stocks matched filters. "
+                "Try disabling Strict Mode, or enable Debug Mode to see why stocks are being dropped."
+            )
         st.stop()
 
     df = pd.DataFrame(results)
