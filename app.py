@@ -1,8 +1,6 @@
 # breakout_scanner.py
-# Streamlit Breakout Continuation Scanner
+# Streamlit Breakout Continuation Scanner (Customizable Filters)
 # ---------------------------------------
-# Requirements:
-# pip install streamlit yfinance pandas numpy ta requests
 
 import streamlit as st
 import pandas as pd
@@ -27,6 +25,27 @@ st.set_page_config(
 st.title("Breakout Continuation Scanner")
 
 # ---------------------------------------------------
+# FILTER DEFAULTS & SESSION STATE
+# ---------------------------------------------------
+
+# Define our default threshold values
+FILTER_DEFAULTS = {
+    "min_rvol": 1.0,
+    "min_1m_trend": 0.0,
+    "min_6m_trend": 0.0,
+    "max_ath_dist": -35.0,
+    "max_rsi": 85.0,
+    "max_bbpos": 1.1,
+    "max_bw": 95.0,
+    "max_accel": 4.0
+}
+
+# Initialize session state for each filter if they don't exist
+for key, val in FILTER_DEFAULTS.items():
+    if key not in st.session_state:
+        st.session_state[key] = val
+
+# ---------------------------------------------------
 # GITHUB SETTINGS
 # ---------------------------------------------------
 
@@ -46,7 +65,6 @@ GITHUB_RAW = (
 
 # ---------------------------------------------------
 # RAG COLOUR SCHEME
-# Semi-transparent so they work in both light & dark mode
 # ---------------------------------------------------
 
 RAG_GREEN = "background-color: rgba(0, 200, 80,  0.28)"
@@ -55,7 +73,7 @@ RAG_RED   = "background-color: rgba(220, 50,  50, 0.28)"
 RAG_NONE  = ""
 
 # ---------------------------------------------------
-# FETCH CSV LIST FROM GITHUB
+# HELPER FUNCTIONS
 # ---------------------------------------------------
 
 @st.cache_data(ttl=300)
@@ -75,10 +93,6 @@ def get_github_csv_files():
         st.error(f"Could not fetch file list from GitHub: {e}")
         return []
 
-# ---------------------------------------------------
-# LOAD CSV FROM GITHUB
-# ---------------------------------------------------
-
 @st.cache_data(ttl=300)
 def load_csv_from_github(path):
     url = f"{GITHUB_RAW}/{path}"
@@ -86,90 +100,9 @@ def load_csv_from_github(path):
     resp.raise_for_status()
     return pd.read_csv(io.StringIO(resp.text))
 
-# ---------------------------------------------------
-# SIDEBAR
-# ---------------------------------------------------
-
-st.sidebar.header("Scanner Settings")
-
-all_csv_files = get_github_csv_files()
-
-if not all_csv_files:
-    st.error(
-        "No CSV files found. "
-        "Check GITHUB_USER / GITHUB_REPO at the top of the script."
-    )
-    st.stop()
-
-selected_markets = st.sidebar.multiselect(
-    "Markets (select one or more)",
-    options=all_csv_files,
-    default=all_csv_files[:1] if all_csv_files else [],
-    format_func=lambda x: x.split("/")[-1].replace(".csv", "").upper()
-)
-
-if not selected_markets:
-    st.info("Select at least one market from the sidebar to continue.")
-    st.stop()
-
-max_stocks = st.sidebar.slider(
-    "Maximum Stocks To Scan (per market)",
-    10, 500, 100
-)
-
-strict_mode = st.sidebar.checkbox(
-    "Strict Mode",
-    value=True
-)
-
-debug_mode = st.sidebar.checkbox(
-    "Debug Mode (show why stocks are filtered)",
-    value=False
-)
-
-# ---------------------------------------------------
-# LOAD TICKERS FROM ALL SELECTED MARKETS
-# ---------------------------------------------------
-
-all_tickers = []
-
-for market_path in selected_markets:
-    try:
-        df_market = load_csv_from_github(market_path)
-        if "Ticker" not in df_market.columns:
-            st.warning(
-                f"Skipping {market_path} — no 'Ticker' column found."
-            )
-            continue
-        tickers = df_market["Ticker"].dropna().tolist()[:max_stocks]
-        all_tickers.extend(tickers)
-    except Exception as e:
-        st.warning(f"Could not load {market_path}: {e}")
-
-# Deduplicate while preserving order
-seen = set()
-unique_tickers = []
-for t in all_tickers:
-    if t not in seen:
-        seen.add(t)
-        unique_tickers.append(t)
-
-st.sidebar.markdown(
-    f"**{len(unique_tickers)}** unique tickers loaded across "
-    f"{len(selected_markets)} market(s)"
-)
-
-# ---------------------------------------------------
-# EARNINGS DATE LOOKUP
-# Three-method cascade for maximum yfinance compatibility
-# ---------------------------------------------------
-
 def get_earnings(stock):
-    """
-    Returns (display_str, days_until_int).
-    Tries earnings_dates -> calendar dict -> calendar DataFrame.
-    """
-    # Method 1: stock.earnings_dates (most reliable in recent yfinance)
+    """Returns (display_str, days_until_int)."""
+    # Method 1: stock.earnings_dates
     try:
         ed = stock.earnings_dates
         if ed is not None and not ed.empty:
@@ -180,10 +113,9 @@ def get_earnings(stock):
                 next_date = future.index.min().date()
                 days = (next_date - datetime.now().date()).days
                 return f"{next_date} ({days}d)", days
-    except Exception:
-        pass
+    except Exception: pass
 
-    # Method 2: stock.calendar as dict (yfinance >= 0.2.x)
+    # Method 2: stock.calendar as dict
     try:
         cal = stock.calendar
         if isinstance(cal, dict):
@@ -192,20 +124,64 @@ def get_earnings(stock):
                 next_date = pd.to_datetime(dates[0]).date()
                 days = (next_date - datetime.now().date()).days
                 return f"{next_date} ({days}d)", days
-    except Exception:
-        pass
-
-    # Method 3: stock.calendar as DataFrame (older yfinance)
-    try:
-        cal = stock.calendar
-        if cal is not None and hasattr(cal, "empty") and not cal.empty:
-            next_date = pd.to_datetime(cal.iloc[0][0]).date()
-            days = (next_date - datetime.now().date()).days
-            return f"{next_date} ({days}d)", days
-    except Exception:
-        pass
+    except Exception: pass
 
     return "N/A", 999
+
+# ---------------------------------------------------
+# SIDEBAR
+# ---------------------------------------------------
+
+st.sidebar.header("Scanner Settings")
+
+all_csv_files = get_github_csv_files()
+
+if not all_csv_files:
+    st.error("No CSV files found.")
+    st.stop()
+
+selected_markets = st.sidebar.multiselect(
+    "Markets",
+    options=all_csv_files,
+    default=all_csv_files[:1] if all_csv_files else [],
+    format_func=lambda x: x.split("/")[-1].replace(".csv", "").upper()
+)
+
+max_stocks = st.sidebar.slider("Max Stocks Per Market", 10, 500, 100)
+strict_mode = st.sidebar.checkbox("Strict Mode", value=True)
+debug_mode = st.sidebar.checkbox("Debug Mode", value=False)
+
+# --- STRICT FILTER CUSTOMIZATION SECTION ---
+with st.sidebar.expander("🛠️ Amend Strict Thresholds"):
+    st.session_state.min_rvol = st.number_input("Min RVOL", value=st.session_state.min_rvol, step=0.1)
+    st.session_state.max_rsi = st.number_input("Max RSI", value=st.session_state.max_rsi, step=1.0)
+    st.session_state.min_1m_trend = st.number_input("Min 1M Trend %", value=st.session_state.min_1m_trend, step=1.0)
+    st.session_state.min_6m_trend = st.number_input("Min 6M Trend %", value=st.session_state.min_6m_trend, step=1.0)
+    st.session_state.max_ath_dist = st.number_input("Max ATH Distance %", value=st.session_state.max_ath_dist, step=1.0)
+    st.session_state.max_bbpos = st.number_input("Max BBPos (if MACD neg)", value=st.session_state.max_bbpos, step=0.1)
+    st.session_state.max_bw = st.number_input("Max BW % (if MACD neg)", value=st.session_state.max_bw, step=1.0)
+    st.session_state.max_accel = st.number_input("Max Accel (if MACD neg)", value=st.session_state.max_accel, step=0.5)
+    
+    if st.button("Restore Defaults"):
+        for key, val in FILTER_DEFAULTS.items():
+            st.session_state[key] = val
+        st.rerun()
+
+# ---------------------------------------------------
+# LOAD TICKERS
+# ---------------------------------------------------
+
+all_tickers = []
+for market_path in selected_markets:
+    try:
+        df_market = load_csv_from_github(market_path)
+        if "Ticker" in df_market.columns:
+            tickers = df_market["Ticker"].dropna().tolist()[:max_stocks]
+            all_tickers.extend(tickers)
+    except Exception: continue
+
+unique_tickers = list(dict.fromkeys(all_tickers))
+st.sidebar.markdown(f"**{len(unique_tickers)}** tickers loaded.")
 
 # ---------------------------------------------------
 # METRIC FUNCTIONS
@@ -215,371 +191,126 @@ def calculate_metrics(ticker):
     try:
         stock = yf.Ticker(ticker)
         hist  = stock.history(period="1y", auto_adjust=True)
+        if len(hist) < 150: return None
 
-        if len(hist) < 150:
-            return None
-
-        close  = hist["Close"]
-        volume = hist["Volume"]
-
+        close, volume = hist["Close"], hist["Volume"]
         current_price = close.iloc[-1]
 
-        # Bollinger Bands
-        bb     = BollingerBands(close=close, window=20, window_dev=2)
-        upper  = bb.bollinger_hband()
-        lower  = bb.bollinger_lband()
-        middle = bb.bollinger_mavg()
-
-        bbpos = (
-            (current_price - lower.iloc[-1]) /
-            (upper.iloc[-1] - lower.iloc[-1])
-        )
-
-        bandwidth_series = ((upper - lower) / middle) * 100
-        bw_percentile    = bandwidth_series.rank(pct=True).iloc[-1] * 100
-
-        # RSI
+        # Indicators
+        bb = BollingerBands(close=close, window=20, window_dev=2)
+        upper, lower, middle = bb.bollinger_hband(), bb.bollinger_lband(), bb.bollinger_mavg()
+        bbpos = (current_price - lower.iloc[-1]) / (upper.iloc[-1] - lower.iloc[-1])
+        bw_series = ((upper - lower) / middle) * 100
+        bw_percentile = bw_series.rank(pct=True).iloc[-1] * 100
         rsi = RSIIndicator(close=close, window=14).rsi().iloc[-1]
-
+        
         # RVOL
-        # Use iloc[-2] (last COMPLETE trading day) to avoid partial-day
-        # volume distortion when the scanner runs during market hours.
-        # Today's bar accumulates volume throughout the session, so
-        # scanning at 9am gives ~1/8th of a full day → RVOL looks tiny.
-        complete_vol = volume.iloc[-2]
-        avg_volume   = volume.iloc[-22:-2].mean()   # 20-day avg, same window
-        rvol         = complete_vol / avg_volume
+        rvol = volume.iloc[-2] / volume.iloc[-22:-2].mean()
 
-        # MACD Histogram Slope
-        macd_obj   = MACD(close)
-        histo      = macd_obj.macd_diff()
+        # MACD
+        histo = MACD(close).macd_diff()
         macd_delta = histo.iloc[-1] - histo.iloc[-4]
 
-        # Acceleration Z-Score
-        returns_3d = close.pct_change(3)
-        current_3d = returns_3d.iloc[-1]
-        mean_3d    = returns_3d.tail(126).mean()
-        std_3d     = returns_3d.tail(126).std()
-        accel_z    = (current_3d - mean_3d) / std_3d
+        # Accel
+        ret3 = close.pct_change(3)
+        accel_z = (ret3.iloc[-1] - ret3.tail(126).mean()) / ret3.tail(126).std()
 
-        # Trend Returns
-        def calc_return(days):
-            return ((close.iloc[-1] / close.iloc[-days]) - 1) * 100
-
-        trend_1d = calc_return(2)
-        trend_1w = calc_return(5)
-        trend_1m = calc_return(21)
-        trend_6m = calc_return(126)
-
-        # ATH Distance
-        ath          = close.max()
-        ath_distance = ((current_price / ath) - 1) * 100
+        # Trends
+        t1d = ((current_price / close.iloc[-2]) - 1) * 100
+        t1w = ((current_price / close.iloc[-5]) - 1) * 100
+        t1m = ((current_price / close.iloc[-21]) - 1) * 100
+        t6m = ((current_price / close.iloc[-126]) - 1) * 100
+        ath_dist = ((current_price / close.max()) - 1) * 100
 
         # Earnings
-        earnings_display, earnings_days = get_earnings(stock)
+        earn_disp, earn_days = get_earnings(stock)
 
-        # Strict Filters
+        # Apply Strict Filters (Earnings Filter Removed)
         if strict_mode:
-            filter_reason = None
-            if macd_delta < 0:
-                filter_reason = f"MACD delta negative ({macd_delta:.3f})"
-            elif rvol < 1:
-                filter_reason = f"RVOL too low ({rvol:.2f})"
-            elif trend_1m < 0:
-                filter_reason = f"1M trend negative ({trend_1m:.1f}%)"
-            elif trend_6m < 0:
-                filter_reason = f"6M trend negative ({trend_6m:.1f}%)"
-            elif ath_distance < -35:
-                filter_reason = f"Too far from ATH ({ath_distance:.1f}%)"
-            elif rsi > 85:
-                filter_reason = f"RSI too high ({rsi:.0f})"
-            elif bbpos > 1.1 and macd_delta < 0:
-                filter_reason = f"BBPos extended + MACD neg"
-            elif bw_percentile > 95 and macd_delta < 0:
-                filter_reason = f"BW climax + MACD neg"
-            elif accel_z > 4 and macd_delta < 0:
-                filter_reason = f"Accel exploding + MACD neg"
-            elif earnings_days <= 1:
-                filter_reason = f"Earnings too close ({earnings_days}d)"
+            reason = None
+            if macd_delta < 0:                       reason = f"MACD delta neg ({macd_delta:.3f})"
+            elif rvol < st.session_state.min_rvol:   reason = f"RVOL < {st.session_state.min_rvol}"
+            elif t1m < st.session_state.min_1m_trend: reason = f"1M Trend < {st.session_state.min_1m_trend}%"
+            elif t6m < st.session_state.min_6m_trend: reason = f"6M Trend < {st.session_state.min_6m_trend}%"
+            elif ath_dist < st.session_state.max_ath_dist: reason = f"ATH Dist < {st.session_state.max_ath_dist}%"
+            elif rsi > st.session_state.max_rsi:     reason = f"RSI > {st.session_state.max_rsi}"
+            elif bbpos > st.session_state.max_bbpos and macd_delta < 0: reason = "Ext BBPos + Neg MACD"
+            elif bw_percentile > st.session_state.max_bw and macd_delta < 0: reason = "BW Climax + Neg MACD"
+            elif accel_z > st.session_state.max_accel and macd_delta < 0: reason = "Accel Explode + Neg MACD"
 
-            if filter_reason:
-                if debug_mode:
-                    return {"_debug": True, "Ticker": ticker, "Filtered By": filter_reason}
-                return None
+            if reason:
+                return {"_debug": True, "Ticker": ticker, "Filtered By": reason} if debug_mode else None
 
-        # Labels
-        def bbpos_label(x):
-            if x > 1.1: return "EXT"
-            if x > 0.8: return "PUSH"
-            if x < 0.2: return "WEAK"
-            return "MID"
-
-        def bw_label(x):
-            if x > 90: return "CLIMAX"
-            if x > 70: return "EXP"
-            if x < 20: return "SQUEEZE"
-            return "NORMAL"
-
-        def accel_label(x):
-            if x > 4:  return "EXPLODE"
-            if x > 2:  return "SURGE"
-            if x > 1:  return "FAST"
-            if x > 0:  return "PUSH"
-            return "SLOW"
-
-        def rsi_label(x):
-            if x > 80: return "EUPH"
-            if x > 70: return "HOT"
-            if x > 55: return "STR"
-            return "MID"
-
-        def rvol_label(x):
-            if x > 5:  return "EXT"
-            if x > 3:  return "HIGH"
-            if x > 1.5: return "ACT"
-            return "LOW"
-
-        def macd_label(x):
-            if x >  0.3:  return "UP STR"
-            if x >  0.05: return "UP BUILD"
-            if x > -0.05: return "FLAT"
-            if x > -0.2:  return "DN WEAK"
-            return "DN FAIL"
+        # Helper Labels
+        def lbl(v, t):
+            if t=="bb": return "EXT" if v>1.1 else "PUSH" if v>0.8 else "WEAK" if v<0.2 else "MID"
+            if t=="bw": return "CLIMAX" if v>90 else "EXP" if v>70 else "SQUEEZE" if v<20 else "NORMAL"
+            if t=="ac": return "EXPLODE" if v>4 else "SURGE" if v>2 else "FAST" if v>1 else "PUSH" if v>0 else "SLOW"
+            if t=="rs": return "EUPH" if v>80 else "HOT" if v>70 else "STR" if v>55 else "MID"
+            if t=="rv": return "EXT" if v>5 else "HIGH" if v>3 else "ACT" if v>1.5 else "LOW"
+            if t=="ma": return "UP STR" if v>0.3 else "UP BUILD" if v>0.05 else "FLAT" if v>-0.05 else "DN WEAK" if v>-0.2 else "DN FAIL"
 
         return {
-            # Display columns
-            "Ticker": ticker,
-            "BBPos":  f"{bbpos:.2f} {bbpos_label(bbpos)}",
-            "BW%":    f"{bw_percentile:.0f} {bw_label(bw_percentile)}",
-            "Accel":  f"{accel_z:.2f} {accel_label(accel_z)}",
-            "RSI":    f"{rsi:.0f} {rsi_label(rsi)}",
-            "RVOL":   f"{rvol:.2f} {rvol_label(rvol)}",
-            "MACD":   macd_label(macd_delta),
-            "Earn":   earnings_display,
-            "1D":     f"{trend_1d:.1f}%",
-            "1W":     f"{trend_1w:.1f}%",
-            "1M":     f"{trend_1m:.1f}%",
-            "6M":     f"{trend_6m:.1f}%",
-            "ATH%":   f"{ath_distance:.1f}%",
-            # Hidden numeric columns (used for RAG colouring)
-            "_bbpos":         bbpos,
-            "_bw":            bw_percentile,
-            "_accel":         accel_z,
-            "_rsi":           rsi,
-            "_rvol":          rvol,
-            "_macd":          macd_delta,
-            "_trend_1d":      trend_1d,
-            "_trend_1w":      trend_1w,
-            "_trend_1m":      trend_1m,
-            "_trend_6m":      trend_6m,
-            "_ath":           ath_distance,
-            "_earnings_days": float(earnings_days),
+            "Ticker": ticker, "BBPos": f"{bbpos:.2f} {lbl(bbpos, 'bb')}", "BW%": f"{bw_percentile:.0f} {lbl(bw_percentile, 'bw')}",
+            "Accel": f"{accel_z:.2f} {lbl(accel_z, 'ac')}", "RSI": f"{rsi:.0f} {lbl(rsi, 'rs')}", "RVOL": f"{rvol:.2f} {lbl(rvol, 'rv')}",
+            "MACD": lbl(macd_delta, 'ma'), "Earn": earn_disp, "1D": f"{t1d:.1f}%", "1W": f"{t1w:.1f}%", "1M": f"{t1m:.1f}%", 
+            "6M": f"{t6m:.1f}%", "ATH%": f"{ath_dist:.1f}%",
+            "_bbpos": bbpos, "_bw": bw_percentile, "_accel": accel_z, "_rsi": rsi, "_rvol": rvol, "_macd": macd_delta,
+            "_trend_1d": t1d, "_trend_1w": t1w, "_trend_1m": t1m, "_trend_6m": t6m, "_ath": ath_dist, "_earnings_days": float(earn_days)
         }
-
-    except Exception:
-        return None
+    except Exception: return None
 
 # ---------------------------------------------------
-# RAG COLOUR LOGIC
+# STYLING & RESULTS
 # ---------------------------------------------------
 
-def rag_color(col_name, val):
-    """Returns a CSS string for a display column given its numeric value."""
-    try:
-        v = float(val)
-    except (TypeError, ValueError):
-        return RAG_NONE
-
-    if col_name == "BBPos":
-        if 0.6 <= v <= 1.0:   return RAG_GREEN  # sweet-spot upper band
-        if 0.4 <= v < 0.6:    return RAG_AMBER  # mid-band
-        if 1.0 < v <= 1.1:    return RAG_AMBER  # mildly extended
-        return RAG_RED                            # very weak or very extended
-
-    if col_name == "BW%":
-        if v > 90:             return RAG_RED    # climax / overextended
-        if v > 80:             return RAG_AMBER  # getting stretched
-        if v >= 25:            return RAG_GREEN  # healthy expansion
-        return RAG_AMBER                          # tight squeeze
-
-    if col_name == "Accel":
-        if 1.0 <= v <= 4.0:   return RAG_GREEN  # surging nicely
-        if 0.0 <= v < 1.0:    return RAG_AMBER  # mild push
-        return RAG_RED                            # decelerating or over-extended
-
-    if col_name == "RSI":
-        if 55 <= v <= 70:      return RAG_GREEN  # strong trend
-        if 70 < v <= 80:       return RAG_AMBER  # hot
-        return RAG_RED                            # euphoric or too weak
-
-    if col_name == "RVOL":
-        if v > 1.5:            return RAG_GREEN  # active
-        if v >= 1.0:           return RAG_AMBER  # average
-        return RAG_RED                            # low
-
-    if col_name == "MACD":
-        if v > 0.05:           return RAG_GREEN  # building momentum
-        if v >= -0.05:         return RAG_AMBER  # flat
-        return RAG_RED                            # rolling over
-
-    if col_name in ("1D", "1W", "1M", "6M"):
-        if v > 0:              return RAG_GREEN
-        if v > -5:             return RAG_AMBER
-        return RAG_RED
-
-    if col_name == "ATH%":
-        if v >= -10:           return RAG_GREEN  # near ATH
-        if v >= -25:           return RAG_AMBER
-        return RAG_RED
-
-    if col_name == "Earn":
-        if v >= 999:           return RAG_NONE   # N/A — no earnings data
-        if v > 14:             return RAG_GREEN  # plenty of runway
-        if v > 3:              return RAG_AMBER  # getting close
-        return RAG_RED                            # imminent
-
+def rag_color(col, v):
+    try: v = float(v)
+    except: return RAG_NONE
+    if col == "BBPos": return RAG_GREEN if 0.6<=v<=1.0 else RAG_AMBER if (0.4<=v<0.6 or 1.0<v<=1.1) else RAG_RED
+    if col == "BW%": return RAG_RED if v>90 else RAG_AMBER if v>80 else RAG_GREEN if v>=25 else RAG_AMBER
+    if col == "Accel": return RAG_GREEN if 1.0<=v<=4.0 else RAG_AMBER if 0.0<=v<1.0 else RAG_RED
+    if col == "RSI": return RAG_GREEN if 55<=v<=70 else RAG_AMBER if 70<v<=80 else RAG_RED
+    if col == "RVOL": return RAG_GREEN if v>1.5 else RAG_AMBER if v>=1.0 else RAG_RED
+    if col == "MACD": return RAG_GREEN if v>0.05 else RAG_AMBER if v>=-0.05 else RAG_RED
+    if col in ("1D", "1W", "1M", "6M"): return RAG_GREEN if v>0 else RAG_AMBER if v>-5 else RAG_RED
+    if col == "ATH%": return RAG_GREEN if v>=-10 else RAG_AMBER if v>=-25 else RAG_RED
+    if col == "Earn": return RAG_NONE if v>=999 else RAG_GREEN if v>14 else RAG_AMBER if v>3 else RAG_RED
     return RAG_NONE
 
-
-# Map each display column to its hidden numeric column
-RAG_COL_MAP = {
-    "BBPos": "_bbpos",
-    "BW%":   "_bw",
-    "Accel": "_accel",
-    "RSI":   "_rsi",
-    "RVOL":  "_rvol",
-    "MACD":  "_macd",
-    "1D":    "_trend_1d",
-    "1W":    "_trend_1w",
-    "1M":    "_trend_1m",
-    "6M":    "_trend_6m",
-    "ATH%":  "_ath",
-    "Earn":  "_earnings_days",
-}
-
-HIDDEN_COLS = list(RAG_COL_MAP.values())
-
+RAG_COL_MAP = { "BBPos": "_bbpos", "BW%": "_bw", "Accel": "_accel", "RSI": "_rsi", "RVOL": "_rvol", "MACD": "_macd", "1D": "_trend_1d", "1W": "_trend_1w", "1M": "_trend_1m", "6M": "_trend_6m", "ATH%": "_ath", "Earn": "_earnings_days" }
 
 def apply_rag_styles(df_full):
-    """
-    Accepts df_full (with hidden numeric cols included).
-    Returns a pandas Styler on df_display with RAG colours applied.
-    """
-    df_display = df_full.drop(columns=HIDDEN_COLS)
-
-    # Build a same-shape DataFrame of CSS strings
-    style_df = pd.DataFrame(
-        "", index=df_display.index, columns=df_display.columns
-    )
-
-    for disp_col, num_col in RAG_COL_MAP.items():
-        if disp_col in df_display.columns and num_col in df_full.columns:
-            style_df[disp_col] = df_full[num_col].apply(
-                lambda v, c=disp_col: rag_color(c, v)
-            )
-
-    return df_display.style.apply(
-        lambda col: style_df[col.name], axis=0
-    )
+    df_disp = df_full.drop(columns=list(RAG_COL_MAP.values()))
+    style_df = pd.DataFrame("", index=df_disp.index, columns=df_disp.columns)
+    for disp, num in RAG_COL_MAP.items():
+        if disp in df_disp.columns:
+            style_df[disp] = df_full[num].apply(lambda v, c=disp: rag_color(c, v))
+    return df_disp.style.apply(lambda col: style_df[col.name], axis=0)
 
 # ---------------------------------------------------
-# RUN SCAN
+# EXECUTION
 # ---------------------------------------------------
 
-scan_button = st.button(
-    f"Run Scanner  ({len(unique_tickers)} tickers)"
-)
-
-if scan_button:
-
-    results       = []
-    debug_results = []
-    progress      = st.progress(0)
-    total         = len(unique_tickers)
-
-    for i, ticker in enumerate(unique_tickers):
-        data = calculate_metrics(ticker)
+if st.button(f"Run Scanner ({len(unique_tickers)} tickers)"):
+    results, debug_results = [], []
+    progress = st.progress(0)
+    for i, t in enumerate(unique_tickers):
+        data = calculate_metrics(t)
         if data:
-            if data.get("_debug"):
-                debug_results.append(data)
-            else:
-                results.append(data)
-        progress.progress((i + 1) / total)
+            if data.get("_debug"): debug_results.append(data)
+            else: results.append(data)
+        progress.progress((i + 1) / len(unique_tickers))
 
-    # ── Debug panel ──────────────────────────────────────────────
     if debug_mode and debug_results:
-        st.subheader(f"Debug: {len(debug_results)} stocks filtered by strict mode")
+        st.subheader("Debug: Filtered Stocks")
         debug_df = pd.DataFrame(debug_results).drop(columns=["_debug"])
-        # Tally filter reasons
-        tally = debug_df["Filtered By"].value_counts().reset_index()
-        tally.columns = ["Filter Reason", "Count"]
-        col_d1, col_d2 = st.columns([1, 2])
-        with col_d1:
-            st.markdown("**Filter reason breakdown**")
-            st.dataframe(tally, use_container_width=True, hide_index=True)
-        with col_d2:
-            st.markdown("**All filtered tickers**")
-            st.dataframe(debug_df, use_container_width=True, height=300, hide_index=True)
-        st.divider()
+        st.dataframe(debug_df, use_container_width=True, hide_index=True)
 
     if not results:
-        if debug_mode:
-            st.warning(
-                f"No stocks passed filters. See debug table above — "
-                f"{len(debug_results)} stocks were filtered out."
-            )
-        else:
-            st.warning(
-                "No stocks matched filters. "
-                "Try disabling Strict Mode, or enable Debug Mode to see why stocks are being dropped."
-            )
-        st.stop()
-
-    df = pd.DataFrame(results)
-
-    # Sort by breakout strength
-    df = df.sort_values(
-        by=["_bbpos", "_accel", "_rvol"],
-        ascending=False
-    ).reset_index(drop=True)
-
-    # Apply RAG styling
-    st.subheader("Scanner Results")
-
-    styled = apply_rag_styles(df)
-
-    st.dataframe(
-        styled,
-        use_container_width=True,
-        height=700
-    )
-
-    st.success(
-        f"{len(df)} stocks matched filters across "
-        f"{len(selected_markets)} market(s)."
-    )
-
-    # RAG colour key
-    with st.expander("RAG Colour Key"):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown("🟢 **GREEN — strong / ideal**")
-            st.markdown(
-                "BBPos 0.6–1.0 · BW% 25–80 · Accel 1–4 · "
-                "RSI 55–70 · RVOL >1.5 · MACD >0.05 · "
-                "Trends +ve · ATH% >-10% · Earn >14d"
-            )
-        with col2:
-            st.markdown("🟡 **AMBER — borderline / caution**")
-            st.markdown(
-                "BBPos mid or mildly ext · BW% squeeze or >80 · "
-                "Accel 0–1 · RSI 70–80 · RVOL 1–1.5 · "
-                "MACD flat · Trends -5–0% · ATH% -10–25% · Earn 4–14d"
-            )
-        with col3:
-            st.markdown("🔴 **RED — weak / risky**")
-            st.markdown(
-                "BBPos <0.4 or >1.1 · BW% >90 climax · "
-                "Accel <0 · RSI >80 or <55 · RVOL <1 · "
-                "MACD <-0.05 · Trends <-5% · ATH% <-25% · Earn ≤3d"
-            )
+        st.warning("No stocks passed the filters.")
+    else:
+        df = pd.DataFrame(results).sort_values(by=["_bbpos", "_accel", "_rvol"], ascending=False).reset_index(drop=True)
+        st.subheader("Scanner Results")
+        st.dataframe(apply_rag_styles(df), use_container_width=True, height=700)
+        st.success(f"{len(df)} stocks found.")
