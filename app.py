@@ -242,8 +242,13 @@ def calculate_metrics(ticker):
         rsi = RSIIndicator(close=close, window=14).rsi().iloc[-1]
 
         # RVOL
-        avg_volume = volume.tail(20).mean()
-        rvol       = volume.iloc[-1] / avg_volume
+        # Use iloc[-2] (last COMPLETE trading day) to avoid partial-day
+        # volume distortion when the scanner runs during market hours.
+        # Today's bar accumulates volume throughout the session, so
+        # scanning at 9am gives ~1/8th of a full day → RVOL looks tiny.
+        complete_vol = volume.iloc[-2]
+        avg_volume   = volume.iloc[-22:-2].mean()   # 20-day avg, same window
+        rvol         = complete_vol / avg_volume
 
         # MACD Histogram Slope
         macd_obj   = MACD(close)
