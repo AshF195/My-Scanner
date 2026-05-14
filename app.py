@@ -49,9 +49,9 @@ GITHUB_RAW = (
 # Semi-transparent so they work in both light & dark mode
 # ---------------------------------------------------
 
-RAG_GREEN = "background-color: rgba(0, 200, 80,  0.28); color: inherit"
-RAG_AMBER = "background-color: rgba(255, 170, 0,  0.28); color: inherit"
-RAG_RED   = "background-color: rgba(220, 50,  50, 0.28); color: inherit"
+RAG_GREEN = "background-color: rgba(0, 200, 80,  0.28)"
+RAG_AMBER = "background-color: rgba(255, 170, 0,  0.28)"
+RAG_RED   = "background-color: rgba(220, 50,  50, 0.28)"
 RAG_NONE  = ""
 
 # ---------------------------------------------------
@@ -428,9 +428,9 @@ def rag_color(col_name, val):
         return RAG_RED
 
     if col_name == "Earn":
+        if v >= 999:           return RAG_NONE   # N/A — no earnings data
         if v > 14:             return RAG_GREEN  # plenty of runway
         if v > 3:              return RAG_AMBER  # getting close
-        if v == 999:           return RAG_NONE   # N/A
         return RAG_RED                            # imminent
 
     return RAG_NONE
