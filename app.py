@@ -1,18 +1,19 @@
 # breakout_scanner.py
+# Streamlit Breakout Continuation Scanner
 # ---------------------------------------
-# Breakout Continuation Scanner (Unified Universe + Market Filter)
+# Requirements:
+# pip install streamlit yfinance pandas numpy ta
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import yfinance as yf
-import glob
-import os
 from datetime import datetime
-
 from ta.volatility import BollingerBands
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
+import os
+import glob
 
 # ---------------------------------------------------
 # PAGE CONFIG
@@ -26,64 +27,56 @@ st.set_page_config(
 st.title("Breakout Continuation Scanner")
 
 # ---------------------------------------------------
-# LOAD ALL MARKETS
+# SETTINGS
 # ---------------------------------------------------
 
 DATA_FOLDER = "markets"
 
+# ---------------------------------------------------
+# LOAD MARKET FILES DYNAMICALLY
+# ---------------------------------------------------
+
 csv_files = glob.glob(os.path.join(DATA_FOLDER, "*.csv"))
+market_files = [os.path.basename(f) for f in csv_files]
 
-all_data = []
-
-for file in csv_files:
-    df = pd.read_csv(file)
-
-    if "Ticker" not in df.columns:
-        continue
-
-    market_name = os.path.splitext(os.path.basename(file))[0]
-
-    df["Market"] = market_name
-
-    all_data.append(df)
-
-market_df = pd.concat(all_data, ignore_index=True)
-
-# ---------------------------------------------------
-# SIDEBAR SETTINGS
-# ---------------------------------------------------
+if not market_files:
+    st.error("No CSV files found in /markets folder")
+    st.stop()
 
 st.sidebar.header("Scanner Settings")
 
-selected_markets = st.sidebar.multiselect(
-    "Select Markets",
-    sorted(market_df["Market"].unique()),
-    default=sorted(market_df["Market"].unique())
+selected_market = st.sidebar.selectbox(
+    "Market",
+    market_files
 )
 
 max_stocks = st.sidebar.slider(
-    "Max Stocks To Scan",
+    "Maximum Stocks To Scan",
     10,
     500,
     100
 )
 
 strict_mode = st.sidebar.checkbox(
-    "Strict Mode (recommended)",
+    "Strict Mode",
     value=True
 )
 
 run_scan = st.sidebar.button("Run Scanner")
 
 # ---------------------------------------------------
-# FILTER BY MARKET
+# LOAD SELECTED CSV
 # ---------------------------------------------------
 
-filtered_df = market_df[
-    market_df["Market"].isin(selected_markets)
-]
+csv_path = os.path.join(DATA_FOLDER, selected_market)
 
-tickers = filtered_df["Ticker"].dropna().unique().tolist()[:max_stocks]
+market_df = pd.read_csv(csv_path)
+
+if "Ticker" not in market_df.columns:
+    st.error("CSV must contain a 'Ticker' column")
+    st.stop()
+
+tickers = market_df["Ticker"].dropna().tolist()[:max_stocks]
 
 # ---------------------------------------------------
 # METRICS FUNCTION
@@ -92,7 +85,9 @@ tickers = filtered_df["Ticker"].dropna().unique().tolist()[:max_stocks]
 def calculate_metrics(ticker):
 
     try:
+
         stock = yf.Ticker(ticker)
+
         hist = stock.history(period="1y", auto_adjust=True)
 
         if len(hist) < 150:
@@ -113,10 +108,23 @@ def calculate_metrics(ticker):
         lower = bb.bollinger_lband()
         middle = bb.bollinger_mavg()
 
-        bbpos = (current_price - lower.iloc[-1]) / (upper.iloc[-1] - lower.iloc[-1])
+        bbpos = (
+            (current_price - lower.iloc[-1]) /
+            (upper.iloc[-1] - lower.iloc[-1])
+        )
 
-        bandwidth_series = ((upper - lower) / middle) * 100
-        bw_percentile = bandwidth_series.rank(pct=True).iloc[-1] * 100
+        bandwidth = (
+            (upper.iloc[-1] - lower.iloc[-1]) /
+            middle.iloc[-1]
+        ) * 100
+
+        bandwidth_series = (
+            (upper - lower) / middle
+        ) * 100
+
+        bw_percentile = (
+            bandwidth_series.rank(pct=True).iloc[-1]
+        ) * 100
 
         # ---------------------------------------------------
         # RSI
@@ -129,19 +137,21 @@ def calculate_metrics(ticker):
         # ---------------------------------------------------
 
         avg_volume = volume.tail(20).mean()
+
         rvol = volume.iloc[-1] / avg_volume
 
         # ---------------------------------------------------
-        # MACD HISTOGRAM + SLOPE
+        # MACD HISTOGRAM SLOPE
         # ---------------------------------------------------
 
         macd = MACD(close)
+
         histo = macd.macd_diff()
 
         macd_delta = histo.iloc[-1] - histo.iloc[-4]
 
         # ---------------------------------------------------
-        # ACCELERATION (Z SCORE)
+        # ACCELERATION Z-SCORE
         # ---------------------------------------------------
 
         returns_3d = close.pct_change(3)
@@ -158,7 +168,9 @@ def calculate_metrics(ticker):
         # ---------------------------------------------------
 
         def calc_return(days):
-            return ((close.iloc[-1] / close.iloc[-days]) - 1) * 100
+            return (
+                (close.iloc[-1] / close.iloc[-days]) - 1
+            ) * 100
 
         trend_1d = calc_return(2)
         trend_1w = calc_return(5)
@@ -170,10 +182,13 @@ def calculate_metrics(ticker):
         # ---------------------------------------------------
 
         ath = close.max()
-        ath_distance = ((current_price / ath) - 1) * 100
+
+        ath_distance = (
+            (current_price / ath) - 1
+        ) * 100
 
         # ---------------------------------------------------
-        # EARNINGS
+        # EARNINGS DATE
         # ---------------------------------------------------
 
         earnings_display = "N/A"
@@ -184,9 +199,13 @@ def calculate_metrics(ticker):
 
             if cal is not None and not cal.empty:
 
-                earnings_date = pd.to_datetime(cal.iloc[0][0]).date()
+                earnings_date = pd.to_datetime(
+                    cal.iloc[0][0]
+                ).date()
 
-                earnings_days = (earnings_date - datetime.now().date()).days
+                earnings_days = (
+                    earnings_date - datetime.now().date()
+                ).days
 
                 earnings_display = f"{earnings_date} ({earnings_days}d)"
 
@@ -199,52 +218,112 @@ def calculate_metrics(ticker):
 
         if strict_mode:
 
-            if (
-                macd_delta < 0 or
-                rvol < 1 or
-                trend_1m < 0 or
-                trend_6m < 0 or
-                ath_distance < -35 or
-                rsi > 85 or
-                (bbpos > 1.1 and macd_delta < 0) or
-                (bw_percentile > 95 and macd_delta < 0) or
-                (accel_z > 4 and macd_delta < 0) or
-                earnings_days <= 1
-            ):
+            remove = False
+
+            if macd_delta < 0:
+                remove = True
+
+            if rvol < 1:
+                remove = True
+
+            if trend_1m < 0:
+                remove = True
+
+            if trend_6m < 0:
+                remove = True
+
+            if ath_distance < -35:
+                remove = True
+
+            if rsi > 85:
+                remove = True
+
+            if bbpos > 1.1 and macd_delta < 0:
+                remove = True
+
+            if bw_percentile > 95 and macd_delta < 0:
+                remove = True
+
+            if accel_z > 4 and macd_delta < 0:
+                remove = True
+
+            if earnings_days <= 1:
+                remove = True
+
+            if remove:
                 return None
 
         # ---------------------------------------------------
         # LABELS
         # ---------------------------------------------------
 
-        def label_bb(x):
-            return "EXT" if x > 1.1 else "PUSH" if x > 0.8 else "MID" if x > 0.2 else "WEAK"
+        def bbpos_label(x):
+            if x > 1.1:
+                return "EXT"
+            elif x > 0.8:
+                return "PUSH"
+            elif x < 0.2:
+                return "WEAK"
+            return "MID"
 
-        def label_bw(x):
-            return "CLIMAX" if x > 90 else "EXP" if x > 70 else "SQUEEZE" if x < 20 else "NORM"
+        def bw_label(x):
+            if x > 90:
+                return "CLIMAX"
+            elif x > 70:
+                return "EXP"
+            elif x < 20:
+                return "SQUEEZE"
+            return "NORMAL"
 
-        def label_acc(x):
-            return "EXPLODE" if x > 4 else "SURGE" if x > 2 else "FAST" if x > 1 else "PUSH" if x > 0 else "SLOW"
+        def accel_label(x):
+            if x > 4:
+                return "EXPLODE"
+            elif x > 2:
+                return "SURGE"
+            elif x > 1:
+                return "FAST"
+            elif x > 0:
+                return "PUSH"
+            return "SLOW"
 
-        def label_rsi(x):
-            return "EUPH" if x > 80 else "HOT" if x > 70 else "STR" if x > 55 else "MID"
+        def rsi_label(x):
+            if x > 80:
+                return "EUPH"
+            elif x > 70:
+                return "HOT"
+            elif x > 55:
+                return "STR"
+            return "MID"
 
-        def label_rvol(x):
-            return "EXT" if x > 5 else "HIGH" if x > 3 else "ACT" if x > 1.5 else "LOW"
+        def rvol_label(x):
+            if x > 5:
+                return "EXT"
+            elif x > 3:
+                return "HIGH"
+            elif x > 1.5:
+                return "ACT"
+            return "LOW"
 
-        def label_macd(x):
-            return "↑ STR" if x > 0.3 else "↑ BUILD" if x > 0.05 else "→ FLAT" if x > -0.05 else "↓ WEAK" if x > -0.2 else "↓ FAIL"
+        def macd_label(x):
+            if x > 0.3:
+                return "↑ STR"
+            elif x > 0.05:
+                return "↑ BUILD"
+            elif x > -0.05:
+                return "→ FLAT"
+            elif x > -0.2:
+                return "↓ WEAK"
+            return "↓ FAIL"
 
         return {
             "Ticker": ticker,
-            "Market": filtered_df.loc[filtered_df["Ticker"] == ticker, "Market"].values[0],
 
-            "BBPos": f"{bbpos:.2f} {label_bb(bbpos)}",
-            "BW%": f"{bw_percentile:.0f} {label_bw(bw_percentile)}",
-            "Accel": f"{accel_z:.2f} {label_acc(accel_z)}",
-            "RSI": f"{rsi:.0f} {label_rsi(rsi)}",
-            "RVOL": f"{rvol:.2f} {label_rvol(rvol)}",
-            "MACDΔ": label_macd(macd_delta),
+            "BBPos": f"{bbpos:.2f} {bbpos_label(bbpos)}",
+            "BW%": f"{bw_percentile:.0f} {bw_label(bw_percentile)}",
+            "Accel": f"{accel_z:.2f} {accel_label(accel_z)}",
+            "RSI": f"{rsi:.0f} {rsi_label(rsi)}",
+            "RVOL": f"{rvol:.2f} {rvol_label(rvol)}",
+            "MACDΔ": macd_label(macd_delta),
 
             "Earn": earnings_display,
 
@@ -263,6 +342,7 @@ def calculate_metrics(ticker):
 if run_scan:
 
     results = []
+
     progress = st.progress(0)
 
     for i, ticker in enumerate(tickers):
