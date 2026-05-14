@@ -2,18 +2,18 @@
 # Streamlit Breakout Continuation Scanner
 # ---------------------------------------
 # Requirements:
-# pip install streamlit yfinance pandas numpy ta
+# pip install streamlit yfinance pandas numpy ta requests
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import requests
+import io
 from datetime import datetime
 from ta.volatility import BollingerBands
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
-import os
-import glob
 
 # ---------------------------------------------------
 # PAGE CONFIG
@@ -27,31 +27,82 @@ st.set_page_config(
 st.title("Breakout Continuation Scanner")
 
 # ---------------------------------------------------
-# SETTINGS
+# GITHUB SETTINGS — update these two lines
 # ---------------------------------------------------
 
-DATA_FOLDER = "markets"
+GITHUB_USER = "AshF195"       # <-- change this
+GITHUB_REPO = "My-Scanner"      # <-- change this
+GITHUB_BRANCH = "main"
+
+GITHUB_API = (
+    f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}"
+    f"/git/trees/{GITHUB_BRANCH}?recursive=1"
+)
+
+GITHUB_RAW = (
+    f"https://raw.githubusercontent.com/{GITHUB_USER}"
+    f"/{GITHUB_REPO}/{GITHUB_BRANCH}"
+)
 
 # ---------------------------------------------------
-# LOAD MARKET FILES DYNAMICALLY
+# FETCH CSV LIST FROM GITHUB
 # ---------------------------------------------------
 
-csv_files = glob.glob(os.path.join(DATA_FOLDER, "*.csv"))
-market_files = [os.path.basename(f) for f in csv_files]
+@st.cache_data(ttl=300)
+def get_github_csv_files():
+    try:
+        resp = requests.get(GITHUB_API, timeout=10)
+        resp.raise_for_status()
+        tree = resp.json().get("tree", [])
+        csv_files = [
+            item["path"]
+            for item in tree
+            if item["path"].lower().endswith(".csv")
+            and item["type"] == "blob"
+        ]
+        return sorted(csv_files)
+    except Exception as e:
+        st.error(f"Could not fetch file list from GitHub: {e}")
+        return []
 
-if not market_files:
-    st.error("No CSV files found in /markets folder")
-    st.stop()
+# ---------------------------------------------------
+# LOAD CSV FROM GITHUB
+# ---------------------------------------------------
+
+@st.cache_data(ttl=300)
+def load_csv_from_github(path):
+    url = f"{GITHUB_RAW}/{path}"
+    resp = requests.get(url, timeout=10)
+    resp.raise_for_status()
+    return pd.read_csv(io.StringIO(resp.text))
+
+# ---------------------------------------------------
+# SIDEBAR
+# ---------------------------------------------------
 
 st.sidebar.header("Scanner Settings")
 
-selected_market = st.sidebar.selectbox(
-    "Market",
-    market_files
+all_csv_files = get_github_csv_files()
+
+if not all_csv_files:
+    st.error(
+        "No CSV files found. Check your GITHUB_USER / GITHUB_REPO values at the top of the script."
+    )
+    st.stop()
+
+selected_markets = st.sidebar.multiselect(
+    "Markets (select one or more)",
+    options=all_csv_files,
+    default=all_csv_files[:1] if all_csv_files else [],
+    format_func=lambda x: x.split("/")[-1].replace(".csv", "").upper()
 )
 
+if not selected_markets:
+    st.info("Select at least one market from the sidebar to continue.")
+    st.stop()
+
 max_stocks = st.sidebar.slider(
-    "Maximum Stocks To Scan",
+    "Maximum Stocks To Scan (per market)",
     10,
     500,
     100
@@ -62,24 +113,40 @@ strict_mode = st.sidebar.checkbox(
     value=True
 )
 
-run_scan = st.sidebar.button("Run Scanner")
-
 # ---------------------------------------------------
-# LOAD SELECTED CSV
+# LOAD TICKERS FROM ALL SELECTED MARKETS
 # ---------------------------------------------------
 
-csv_path = os.path.join(DATA_FOLDER, selected_market)
+all_tickers = []
 
-market_df = pd.read_csv(csv_path)
+for market_path in selected_markets:
+    try:
+        df_market = load_csv_from_github(market_path)
+        if "Ticker" not in df_market.columns:
+            st.warning(
+                f"Skipping {market_path} — no 'Ticker' column found."
+            )
+            continue
+        tickers = df_market["Ticker"].dropna().tolist()[:max_stocks]
+        all_tickers.extend(tickers)
+    except Exception as e:
+        st.warning(f"Could not load {market_path}: {e}")
 
-if "Ticker" not in market_df.columns:
-    st.error("CSV must contain a 'Ticker' column")
-    st.stop()
+# Deduplicate while preserving order
+seen = set()
+unique_tickers = []
+for t in all_tickers:
+    if t not in seen:
+        seen.add(t)
+        unique_tickers.append(t)
 
-tickers = market_df["Ticker"].dropna().tolist()[:max_stocks]
+st.sidebar.markdown(
+    f"**{len(unique_tickers)}** unique tickers loaded across "
+    f"{len(selected_markets)} market(s)"
+)
 
 # ---------------------------------------------------
-# METRICS FUNCTION
+# METRIC FUNCTIONS
 # ---------------------------------------------------
 
 def calculate_metrics(ticker):
@@ -118,6 +185,7 @@ def calculate_metrics(ticker):
             middle.iloc[-1]
         ) * 100
 
+        # Bandwidth Percentile
         bandwidth_series = (
             (upper - lower) / middle
         ) * 100
@@ -318,55 +386,114 @@ def calculate_metrics(ticker):
         return {
             "Ticker": ticker,
 
-            "BBPos": f"{bbpos:.2f} {bbpos_label(bbpos)}",
-            "BW%": f"{bw_percentile:.0f} {bw_label(bw_percentile)}",
-            "Accel": f"{accel_z:.2f} {accel_label(accel_z)}",
-            "RSI": f"{rsi:.0f} {rsi_label(rsi)}",
-            "RVOL": f"{rvol:.2f} {rvol_label(rvol)}",
-            "MACDΔ": macd_label(macd_delta),
+            "BBPos":
+                f"{bbpos:.2f} {bbpos_label(bbpos)}",
 
-            "Earn": earnings_display,
+            "BW%":
+                f"{bw_percentile:.0f} {bw_label(bw_percentile)}",
 
-            "1D": f"{trend_1d:.1f}%",
-            "1W": f"{trend_1w:.1f}%",
-            "1M": f"{trend_1m:.1f}%",
-            "6M": f"{trend_6m:.1f}%",
+            "Accel":
+                f"{accel_z:.2f} {accel_label(accel_z)}",
 
-            "ATH%": f"{ath_distance:.1f}%"
+            "RSI":
+                f"{rsi:.0f} {rsi_label(rsi)}",
+
+            "RVOL":
+                f"{rvol:.2f} {rvol_label(rvol)}",
+
+            "MACDΔ":
+                macd_label(macd_delta),
+
+            "Earn":
+                earnings_display,
+
+            "1D":
+                f"{trend_1d:.1f}%",
+
+            "1W":
+                f"{trend_1w:.1f}%",
+
+            "1M":
+                f"{trend_1m:.1f}%",
+
+            "6M":
+                f"{trend_6m:.1f}%",
+
+            "ATH%":
+                f"{ath_distance:.1f}%",
+
+            # Hidden sort fields
+            "_bbpos": bbpos,
+            "_accel": accel_z,
+            "_rvol": rvol,
+            "_macd": macd_delta,
+            "_bw": bw_percentile
         }
 
+    except:
+        return None
+
 # ---------------------------------------------------
-# RUN SCANNER
+# RUN SCAN
 # ---------------------------------------------------
 
-if run_scan:
+scan_button = st.button(
+    f"Run Scanner ({len(unique_tickers)} tickers)"
+)
+
+if scan_button:
 
     results = []
 
     progress = st.progress(0)
 
-    for i, ticker in enumerate(tickers):
+    total = len(unique_tickers)
+
+    for i, ticker in enumerate(unique_tickers):
 
         data = calculate_metrics(ticker)
 
         if data:
             results.append(data)
 
-        progress.progress((i + 1) / len(tickers))
+        progress.progress((i + 1) / total)
 
-    if not results:
-        st.warning("No stocks passed filters.")
+    if len(results) == 0:
+        st.warning("No stocks matched filters.")
         st.stop()
 
     df = pd.DataFrame(results)
 
+    # ---------------------------------------------------
+    # SORTING
+    # ---------------------------------------------------
+
     df = df.sort_values(
-        by=["BBPos", "Accel", "RVOL"],
+        by=["_bbpos", "_accel", "_rvol"],
         ascending=False
     )
 
-    st.subheader("Breakout Candidates")
+    # Drop hidden columns
+    hidden_cols = [
+        "_bbpos",
+        "_accel",
+        "_rvol",
+        "_macd",
+        "_bw"
+    ]
 
-    st.dataframe(df, use_container_width=True, height=700)
+    df_display = df.drop(columns=hidden_cols)
 
-    st.success(f"{len(df)} stocks found.")
+    # ---------------------------------------------------
+    # DISPLAY
+    # ---------------------------------------------------
+
+    st.subheader("Scanner Results")
+
+    st.dataframe(
+        df_display,
+        use_container_width=True,
+        height=700
+    )
+
+    st.success(f"{len(df_display)} stocks matched filters.")
