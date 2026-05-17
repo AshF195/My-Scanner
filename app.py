@@ -30,8 +30,7 @@ st.title("Breakout Continuation Scanner")
 # SETTINGS
 # ---------------------------------------------------
 
-# Look for CSV files in the same folder as this app.py file
-DATA_FOLDER = os.path.dirname(os.path.abspath(__file__))
+DATA_FOLDER = "markets"
 
 # ---------------------------------------------------
 # LOAD MARKET FILES DYNAMICALLY
@@ -41,7 +40,7 @@ csv_files = glob.glob(os.path.join(DATA_FOLDER, "*.csv"))
 market_files = [os.path.basename(f) for f in csv_files]
 
 if not market_files:
-    st.error("No CSV files found in the main app folder")
+    st.error("No CSV files found in /markets folder")
     st.stop()
 
 st.sidebar.header("Scanner Settings")
@@ -335,10 +334,6 @@ def calculate_metrics(ticker):
 
             "ATH%": f"{ath_distance:.1f}%"
         }
-
-    except Exception as e:
-        print(f"Error processing {ticker}: {e}")
-        return None
 
 # ---------------------------------------------------
 # RUN SCANNER
