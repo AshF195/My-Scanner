@@ -289,95 +289,84 @@ def apply_rag_styles(df_full):
 
 if app_mode == "Scanner":
     all_tickers = []
+
     for market_path in selected_markets:
         try:
             df_market = load_csv_from_github(market_path)
             if "Ticker" in df_market.columns:
                 all_tickers.extend(df_market["Ticker"].dropna().tolist()[:max_stocks])
-        except: pass
+        except:
+            pass
+
     unique_tickers = list(dict.fromkeys(all_tickers))
+
+    if "last_results" not in st.session_state:
+        st.session_state.last_results = None
 
     if st.button(f"Run Scanner ({len(unique_tickers)} tickers)"):
         results, debug_results = [], []
+
         progress = st.progress(0)
+
         for i, ticker in enumerate(unique_tickers):
             data = calculate_metrics(ticker)
+
             if data:
-                if data.get("_debug"): debug_results.append(data)
-                else: results.append(data)
+                if data.get("_debug"):
+                    debug_results.append(data)
+                else:
+                    results.append(data)
+
             progress.progress((i + 1) / len(unique_tickers))
 
         if debug_mode and debug_results:
             st.subheader("Debug: Filtered Stocks")
-            st.dataframe(pd.DataFrame(debug_results).drop(columns=["_debug"]), use_container_width=True, hide_index=True)
+            st.dataframe(
+                pd.DataFrame(debug_results).drop(columns=["_debug"]),
+                use_container_width=True,
+                hide_index=True
+            )
 
         if not results:
+            st.session_state.last_results = None
             st.warning("No stocks passed filters.")
         else:
-            df = pd.DataFrame(results).sort_values(by=["_bbpos", "_accel", "_rvol"], ascending=False).reset_index(drop=True)
-            st.session_state.last_results = df
-            st.subheader("Scanner Results")
-            st.dataframe(apply_rag_styles(df.drop(columns=["Price"])), use_container_width=True, height=500)
-            
-            st.divider()
-            st.subheader("📥 Save to Portfolio")
-            to_add = st.multiselect("Select Tickers to Baseline:", options=df["Ticker"].tolist())
-            if st.button("Confirm Save to portfolio_db.csv"):
-                for t in to_add:
-                    snap = df[df["Ticker"] == t].to_dict('records')[0]
-                    snap['Baseline_Date'] = datetime.now().strftime("%Y-%m-%d")
-                    st.session_state.portfolio[t] = snap
-                save_portfolio(st.session_state.portfolio)
-                st.success(f"Saved {len(to_add)} tickers.")
+            df = (
+                pd.DataFrame(results)
+                .sort_values(by=["_bbpos", "_accel", "_rvol"], ascending=False)
+                .reset_index(drop=True)
+            )
 
-elif app_mode == "My Portfolio":
-    st.header("My Portfolio Tracker")
-    if not st.session_state.portfolio:
-        st.info("Portfolio is empty. Add stocks from the Scanner.")
-    else:
-        port_data = []
-        prog_p = st.progress(0)
-        tickers = list(st.session_state.portfolio.keys())
-        
-        for i, ticker in enumerate(tickers):
-            base = st.session_state.portfolio[ticker]
-            curr = calculate_metrics(ticker)
-            if curr:
-                change = ((curr['Price'] / base['Price']) - 1) * 100
-                # Flag Logic
-                if change < -3.0 or curr['_macd'] < -0.05:
-                    status = "🔴 NEGATIVE"
-                elif change > 2.0 and curr['_macd'] > 0.05:
-                    status = "🟢 POSITIVE"
-                else:
-                    status = "🟡 NEUTRAL"
-                
-                port_data.append({
-                    "Ticker": ticker,
-                    "Flag": status,
-                    "Gain/Loss": f"{change:.2f}%",
-                    "Price (Now)": f"${curr['Price']:.2f}",
-                    "MACD (Now)": curr['MACD'],
-                    "RSI (Now)": curr['RSI'],
-                    "Entry Price": f"${base['Price']:.2f}",
-                    "Date Added": base['Baseline_Date']
-                })
-            prog_p.progress((i+1)/len(tickers))
-        
-        if port_data:
-            df_port = pd.DataFrame(port_data)
-            st.dataframe(apply_rag_styles(df_port), use_container_width=True, hide_index=True)
-            
-            st.divider()
-            col1, col2 = st.columns(2)
-            with col1:
-                rem = st.selectbox("Remove stock:", [""] + tickers)
-                if st.button("Delete Ticker") and rem:
-                    del st.session_state.portfolio[rem]
-                    save_portfolio(st.session_state.portfolio)
-                    st.rerun()
-            with col2:
-                if st.button("Clear All Data"):
-                    st.session_state.portfolio = {}
-                    save_portfolio({})
-                    st.rerun()
+            st.session_state.last_results = df
+
+    if st.session_state.last_results is not None:
+        df = st.session_state.last_results
+
+        st.subheader("Scanner Results")
+
+        st.dataframe(
+            apply_rag_styles(df.drop(columns=["Price"])),
+            use_container_width=True,
+            height=500
+        )
+
+        st.divider()
+        st.subheader("📥 Save to Portfolio")
+
+        with st.form("save_to_portfolio_form"):
+            to_add = st.multiselect(
+                "Select Tickers to Baseline:",
+                options=df["Ticker"].tolist()
+            )
+
+            submitted = st.form_submit_button("Confirm Save to portfolio_db.csv")
+
+            if submitted:
+                for t in to_add:
+                    snap = df[df["Ticker"] == t].to_dict("records")[0]
+                    snap["Baseline_Date"] = datetime.now().strftime("%Y-%m-%d")
+                    st.session_state.portfolio[t] = snap
+
+                save_portfolio(st.session_state.portfolio)
+
+                st.success(f"Saved {len(to_add)} tickers.")
