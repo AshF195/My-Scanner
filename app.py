@@ -335,6 +335,10 @@ def calculate_metrics(ticker):
             "ATH%": f"{ath_distance:.1f}%"
         }
 
+    except Exception as e:
+        print(f"Error processing {ticker}: {e}")
+        return None
+
 # ---------------------------------------------------
 # RUN SCANNER
 # ---------------------------------------------------
