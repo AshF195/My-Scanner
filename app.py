@@ -14,10 +14,6 @@ from ta.volatility import BollingerBands
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
 
-# ---------------------------------------------------
-# PAGE CONFIG
-# ---------------------------------------------------
-
 st.set_page_config(
     page_title="Breakout Continuation Scanner",
     layout="wide"
@@ -25,27 +21,18 @@ st.set_page_config(
 
 st.title("Breakout Continuation Scanner")
 
-# ---------------------------------------------------
-# PERSISTENCE & PORTFOLIO LOGIC
-# ---------------------------------------------------
-
 PORTFOLIO_FILE = "portfolio_db.csv"
 SNAPSHOT_FILE = "portfolio_snapshots.csv"
 
 def clean_value(value):
     if pd.isna(value):
         return ""
-
     if isinstance(value, np.generic):
         return value.item()
-
     return value
 
 def clean_row(row):
-    return {
-        key: clean_value(value)
-        for key, value in row.items()
-    }
+    return {key: clean_value(value) for key, value in row.items()}
 
 def dataframe_to_portfolio(df):
     if "Ticker" not in df.columns:
@@ -55,7 +42,6 @@ def dataframe_to_portfolio(df):
 
     for _, row in df.iterrows():
         ticker = str(row["Ticker"]).strip()
-
         if ticker:
             portfolio[ticker] = clean_row(row.to_dict())
 
@@ -64,12 +50,9 @@ def dataframe_to_portfolio(df):
 def load_portfolio():
     if os.path.exists(PORTFOLIO_FILE):
         df = pd.read_csv(PORTFOLIO_FILE)
-
         if "Ticker" not in df.columns:
             return {}
-
         return dataframe_to_portfolio(df)
-
     return {}
 
 def save_portfolio():
@@ -80,11 +63,7 @@ def save_portfolio():
             os.remove(PORTFOLIO_FILE)
         return
 
-    rows = [
-        clean_row(row)
-        for row in portfolio.values()
-    ]
-
+    rows = [clean_row(row) for row in portfolio.values()]
     df = pd.DataFrame(rows)
 
     if "Ticker" not in df.columns:
@@ -96,10 +75,7 @@ def save_daily_snapshot(rows):
     if not rows:
         return
 
-    df_new = pd.DataFrame([
-        clean_row(row)
-        for row in rows
-    ])
+    df_new = pd.DataFrame([clean_row(row) for row in rows])
 
     if os.path.exists(SNAPSHOT_FILE):
         df_old = pd.read_csv(SNAPSHOT_FILE)
@@ -202,10 +178,6 @@ if "portfolio" not in st.session_state:
 if "last_results" not in st.session_state:
     st.session_state["last_results"] = None
 
-# ---------------------------------------------------
-# SESSION STATE & DEFAULT SETTINGS
-# ---------------------------------------------------
-
 FILTER_DEFAULTS = {
     "st_rvol": 1.5,
     "st_1m_trend": 0.0,
@@ -221,10 +193,6 @@ for key, val in FILTER_DEFAULTS.items():
     if key not in st.session_state:
         st.session_state[key] = val
 
-# ---------------------------------------------------
-# GITHUB SETTINGS
-# ---------------------------------------------------
-
 GITHUB_USER = "AshF195"
 GITHUB_REPO = "My-Scanner"
 GITHUB_BRANCH = "main"
@@ -239,18 +207,10 @@ GITHUB_RAW = (
     f"/{GITHUB_REPO}/{GITHUB_BRANCH}"
 )
 
-# ---------------------------------------------------
-# RAG COLOUR SCHEME
-# ---------------------------------------------------
-
 RAG_GREEN = "background-color: rgba(0, 200, 80, 0.28)"
 RAG_AMBER = "background-color: rgba(255, 170, 0, 0.28)"
 RAG_RED = "background-color: rgba(220, 50, 50, 0.28)"
 RAG_NONE = ""
-
-# ---------------------------------------------------
-# FETCH & LOAD DATA
-# ---------------------------------------------------
 
 @st.cache_data(ttl=300)
 def get_github_csv_files():
@@ -275,10 +235,6 @@ def load_csv_from_github(path):
     resp = requests.get(url, timeout=10)
     resp.raise_for_status()
     return pd.read_csv(io.StringIO(resp.text))
-
-# ---------------------------------------------------
-# SIDEBAR & NAVIGATION
-# ---------------------------------------------------
 
 st.sidebar.title("🚀 Navigation")
 
@@ -308,51 +264,17 @@ strict_mode = st.sidebar.checkbox("Strict Mode", value=True)
 debug_mode = st.sidebar.checkbox("Debug Mode", value=False)
 
 with st.sidebar.expander("🛠️ Strict Filter Settings"):
-    st.session_state.st_rvol = st.number_input(
-        "Min RVOL",
-        value=st.session_state.st_rvol,
-        step=0.1
-    )
-
-    st.session_state.st_max_rsi = st.number_input(
-        "Max RSI",
-        value=st.session_state.st_max_rsi,
-        step=1.0
-    )
-
-    st.session_state.st_1m_trend = st.number_input(
-        "Min 1M Trend %",
-        value=st.session_state.st_1m_trend,
-        step=1.0
-    )
-
-    st.session_state.st_6m_trend = st.number_input(
-        "Min 6M Trend %",
-        value=st.session_state.st_6m_trend,
-        step=1.0
-    )
-
-    st.session_state.st_ath_dist = st.number_input(
-        "Max ATH Distance %",
-        value=st.session_state.st_ath_dist,
-        step=1.0
-    )
-
-    st.session_state.st_max_bbpos = st.number_input(
-        "Max BBPos (if MACD neg)",
-        value=st.session_state.st_max_bbpos,
-        step=0.1
-    )
+    st.session_state.st_rvol = st.number_input("Min RVOL", value=st.session_state.st_rvol, step=0.1)
+    st.session_state.st_max_rsi = st.number_input("Max RSI", value=st.session_state.st_max_rsi, step=1.0)
+    st.session_state.st_1m_trend = st.number_input("Min 1M Trend %", value=st.session_state.st_1m_trend, step=1.0)
+    st.session_state.st_6m_trend = st.number_input("Min 6M Trend %", value=st.session_state.st_6m_trend, step=1.0)
+    st.session_state.st_ath_dist = st.number_input("Max ATH Distance %", value=st.session_state.st_ath_dist, step=1.0)
+    st.session_state.st_max_bbpos = st.number_input("Max BBPos (if MACD neg)", value=st.session_state.st_max_bbpos, step=0.1)
 
     if st.button("Restore Defaults"):
         for key, val in FILTER_DEFAULTS.items():
             st.session_state[key] = val
-
         st.rerun()
-
-# ---------------------------------------------------
-# CORE LOGIC FUNCTIONS
-# ---------------------------------------------------
 
 def get_earnings(stock):
     try:
@@ -412,7 +334,6 @@ def calculate_metrics(ticker):
         )
 
         rsi = RSIIndicator(close=close, window=14).rsi().iloc[-1]
-
         rvol = volume.iloc[-2] / volume.iloc[-22:-2].mean()
 
         histo = MACD(close).macd_diff()
@@ -427,7 +348,6 @@ def calculate_metrics(ticker):
         t6m = ((current_price / close.iloc[-126]) - 1) * 100
 
         ath_dist = ((current_price / close.max()) - 1) * 100
-
         earn_disp, earn_days = get_earnings(stock)
 
         if strict_mode:
@@ -450,12 +370,7 @@ def calculate_metrics(ticker):
 
             if reason:
                 if debug_mode:
-                    return {
-                        "_debug": True,
-                        "Ticker": ticker,
-                        "Filtered By": reason
-                    }
-
+                    return {"_debug": True, "Ticker": ticker, "Filtered By": reason}
                 return None
 
         def bb_lbl(x):
@@ -508,10 +423,6 @@ def calculate_metrics(ticker):
     except:
         return None
 
-# ---------------------------------------------------
-# RAG COLOUR LOGIC
-# ---------------------------------------------------
-
 def rag_color(col, val):
     try:
         if isinstance(val, str) and "%" in val:
@@ -526,33 +437,24 @@ def rag_color(col, val):
             return RAG_AMBER
         if "🔴" in str(val):
             return RAG_RED
-
         return RAG_NONE
 
     if col == "BBPos":
         return RAG_GREEN if 0.6 <= v <= 1.0 else RAG_AMBER if (0.4 <= v < 0.6 or 1.0 < v <= 1.1) else RAG_RED
-
     if col == "BW%":
         return RAG_RED if v > 90 else RAG_AMBER if v > 80 else RAG_GREEN if v >= 25 else RAG_AMBER
-
     if col == "Accel":
         return RAG_GREEN if 1.0 <= v <= 4.0 else RAG_AMBER if 0.0 <= v < 1.0 else RAG_RED
-
     if col == "RSI":
         return RAG_GREEN if 55 <= v <= 80 else RAG_AMBER if 80 < v <= 85 else RAG_RED
-
     if col == "RVOL":
         return RAG_GREEN if v > 1.5 else RAG_AMBER if v >= 1.0 else RAG_RED
-
     if col == "MACD":
         return RAG_GREEN if v > 0.05 else RAG_AMBER if v >= -0.05 else RAG_RED
-
     if col in ("1D", "1W", "1M", "6M", "Gain/Loss"):
         return RAG_GREEN if v > 0 else RAG_AMBER if v > -5 else RAG_RED
-
     if col == "ATH%":
         return RAG_GREEN if v >= -15 else RAG_AMBER if v >= -25 else RAG_RED
-
     if col == "Earn":
         return RAG_NONE if v >= 999 else RAG_GREEN if v > 14 else RAG_AMBER if v > 3 else RAG_RED
 
@@ -602,9 +504,45 @@ def apply_rag_styles(df_full):
 
     return df_disp.style.apply(lambda col: style_df[col.name], axis=0)
 
-# ---------------------------------------------------
-# SNAPSHOT ANALYSIS UI
-# ---------------------------------------------------
+def apply_snapshot_change_styles(hist_display, hist_numeric):
+    style_df = pd.DataFrame("", index=hist_display.index, columns=hist_display.columns)
+
+    change_map = {
+        "Price": "Price",
+        "Gain/Loss": "Gain/Loss",
+        "BBPos": "_bbpos",
+        "BW%": "_bw",
+        "Accel": "_accel",
+        "RSI": "_rsi",
+        "RVOL": "_rvol",
+        "MACD": "_macd",
+        "1D": "_trend_1d",
+        "1W": "_trend_1w",
+        "1M": "_trend_1m",
+        "6M": "_trend_6m",
+        "ATH%": "_ath"
+    }
+
+    for display_col, numeric_col in change_map.items():
+        if display_col not in hist_display.columns or numeric_col not in hist_numeric.columns:
+            continue
+
+        values = pd.to_numeric(hist_numeric[numeric_col], errors="coerce")
+
+        for i in range(len(values)):
+            if i == 0 or pd.isna(values.iloc[i]) or pd.isna(values.iloc[i - 1]):
+                style_df.iloc[i, style_df.columns.get_loc(display_col)] = RAG_AMBER
+            else:
+                diff = values.iloc[i] - values.iloc[i - 1]
+
+                if abs(diff) < 0.0001:
+                    style_df.iloc[i, style_df.columns.get_loc(display_col)] = RAG_AMBER
+                elif diff > 0:
+                    style_df.iloc[i, style_df.columns.get_loc(display_col)] = RAG_GREEN
+                else:
+                    style_df.iloc[i, style_df.columns.get_loc(display_col)] = RAG_RED
+
+    return hist_display.style.apply(lambda col: style_df[col.name], axis=0)
 
 def show_snapshot_analysis(current_tickers):
     snapshots = load_snapshot_history()
@@ -614,7 +552,6 @@ def show_snapshot_analysis(current_tickers):
         return
 
     snapshots = make_snapshot_numeric(snapshots)
-
     available_tickers = sorted(snapshots["Ticker"].dropna().unique().tolist())
 
     if not available_tickers:
@@ -674,10 +611,33 @@ def show_snapshot_analysis(current_tickers):
 
     if chart_cols:
         metric_chart = hist.set_index("Snapshot_Date")[chart_cols].dropna(how="all")
-        metric_chart = metric_chart.rename(
-            columns={v: k for k, v in metric_options.items()}
-        )
+        metric_chart = metric_chart.rename(columns={v: k for k, v in metric_options.items()})
         st.line_chart(metric_chart)
+
+    st.subheader("Chronological Snapshot Table")
+
+    display_cols = [
+        "Snapshot_Date", "Ticker", "Price", "Gain/Loss", "Flag",
+        "BBPos", "BW%", "Accel", "RSI", "RVOL", "MACD",
+        "Earn", "1D", "1W", "1M", "6M", "ATH%"
+    ]
+
+    existing_display_cols = [col for col in display_cols if col in hist.columns]
+    hist_display = hist[existing_display_cols].copy()
+    hist_display["Snapshot_Date"] = hist_display["Snapshot_Date"].dt.strftime("%Y-%m-%d")
+
+    if "Price" in hist_display.columns:
+        hist_display["Price"] = hist_display["Price"].apply(lambda x: f"${x:.2f}" if pd.notna(x) else "")
+
+    if "Gain/Loss" in hist_display.columns:
+        hist_display["Gain/Loss"] = hist_display["Gain/Loss"].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "")
+
+    st.dataframe(
+        apply_snapshot_change_styles(hist_display, hist),
+        use_container_width=True,
+        hide_index=True,
+        height=360
+    )
 
     latest = hist.iloc[-1]
     previous = hist.iloc[-2]
@@ -720,10 +680,6 @@ def show_snapshot_analysis(current_tickers):
         st.write("These rows show what the metrics looked like immediately before a later price drop.")
         st.dataframe(drop_analysis, use_container_width=True, hide_index=True)
 
-# ---------------------------------------------------
-# APP MODES
-# ---------------------------------------------------
-
 if app_mode == "Scanner":
     all_tickers = []
 
@@ -742,7 +698,6 @@ if app_mode == "Scanner":
     if st.button(f"Run Scanner ({len(unique_tickers)} tickers)"):
         results = []
         debug_results = []
-
         progress = st.progress(0)
 
         for i, ticker in enumerate(unique_tickers):
@@ -767,7 +722,6 @@ if app_mode == "Scanner":
         if not results:
             st.session_state["last_results"] = None
             st.warning("No stocks passed filters.")
-
         else:
             df = (
                 pd.DataFrame(results)
@@ -807,11 +761,9 @@ if app_mode == "Scanner":
                     snap = df[df["Ticker"] == t].to_dict("records")[0]
                     snap["Ticker"] = t
                     snap["Baseline_Date"] = datetime.now().strftime("%Y-%m-%d")
-
                     st.session_state["portfolio"][t] = snap
 
                 save_portfolio()
-
                 st.success(f"Saved {len(to_add)} tickers.")
 
 elif app_mode == "My Portfolio":
@@ -830,10 +782,8 @@ elif app_mode == "My Portfolio":
 
         if uploaded_portfolio is not None:
             df_uploaded_portfolio = pd.read_csv(uploaded_portfolio)
-
             st.session_state["portfolio"] = dataframe_to_portfolio(df_uploaded_portfolio)
             save_portfolio()
-
             st.success("Portfolio file uploaded.")
 
         portfolio_bytes = read_file_bytes(PORTFOLIO_FILE)
