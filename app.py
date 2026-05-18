@@ -104,7 +104,7 @@ def make_snapshot_numeric(df):
         "Price", "Gain/Loss", "Daily Change",
         "_bbpos", "_bw", "_accel", "_rsi", "_rvol", "_macd",
         "_trend_1d", "_trend_1w", "_trend_1m", "_trend_6m",
-        "_ath", "_earnings_days"
+        "_52w", "_ath", "_earnings_days"
     ]
 
     for col in numeric_cols:
@@ -131,6 +131,7 @@ def find_pre_drop_changes(hist, drop_threshold_pct):
         "1W Trend": "_trend_1w",
         "1M Trend": "_trend_1m",
         "6M Trend": "_trend_6m",
+        "52W Distance": "_52w",
         "ATH Distance": "_ath"
     }
 
@@ -269,7 +270,7 @@ with st.sidebar.expander("🛠️ Strict Filter Settings"):
     st.session_state.st_max_rsi = st.number_input("Max RSI", value=st.session_state.st_max_rsi, step=1.0)
     st.session_state.st_1m_trend = st.number_input("Min 1M Trend %", value=st.session_state.st_1m_trend, step=1.0)
     st.session_state.st_6m_trend = st.number_input("Min 6M Trend %", value=st.session_state.st_6m_trend, step=1.0)
-    st.session_state.st_ath_dist = st.number_input("Max ATH Distance %", value=st.session_state.st_ath_dist, step=1.0)
+    st.session_state.st_ath_dist = st.number_input("Max True ATH Distance %", value=st.session_state.st_ath_dist, step=1.0)
     st.session_state.st_max_bbpos = st.number_input("Max BBPos (if MACD neg)", value=st.session_state.st_max_bbpos, step=0.1)
 
     if st.button("Restore Defaults"):
@@ -316,8 +317,21 @@ def calculate_metrics(ticker):
             return None
 
         close = hist["Close"]
+        high = hist["High"]
         volume = hist["Volume"]
         current_price = close.iloc[-1]
+
+        high_52w = high.max()
+        dist_52w = ((current_price / high_52w) - 1) * 100
+
+        ath_hist = stock.history(period="max", auto_adjust=True)
+
+        if ath_hist is not None and not ath_hist.empty and "High" in ath_hist.columns:
+            true_ath = ath_hist["High"].max()
+        else:
+            true_ath = high_52w
+
+        ath_dist = ((current_price / true_ath) - 1) * 100
 
         bb = BollingerBands(close=close, window=20, window_dev=2)
 
@@ -348,7 +362,6 @@ def calculate_metrics(ticker):
         t1m = ((current_price / close.iloc[-21]) - 1) * 100
         t6m = ((current_price / close.iloc[-126]) - 1) * 100
 
-        ath_dist = ((current_price / close.max()) - 1) * 100
         earn_disp, earn_days = get_earnings(stock)
 
         if strict_mode:
@@ -363,7 +376,7 @@ def calculate_metrics(ticker):
             elif t6m < st.session_state.st_6m_trend:
                 reason = f"6M Trend < {st.session_state.st_6m_trend}%"
             elif ath_dist < st.session_state.st_ath_dist:
-                reason = f"ATH Dist < {st.session_state.st_ath_dist}%"
+                reason = f"True ATH Dist < {st.session_state.st_ath_dist}%"
             elif rsi > st.session_state.st_max_rsi:
                 reason = f"RSI > {st.session_state.st_max_rsi}"
             elif bbpos > st.session_state.st_max_bbpos and macd_delta < 0:
@@ -406,6 +419,7 @@ def calculate_metrics(ticker):
             "1W": f"{t1w:.1f}%",
             "1M": f"{t1m:.1f}%",
             "6M": f"{t6m:.1f}%",
+            "52W%": f"{dist_52w:.1f}%",
             "ATH%": f"{ath_dist:.1f}%",
             "_bbpos": bbpos,
             "_bw": bw_pct,
@@ -417,6 +431,7 @@ def calculate_metrics(ticker):
             "_trend_1w": t1w,
             "_trend_1m": t1m,
             "_trend_6m": t6m,
+            "_52w": dist_52w,
             "_ath": ath_dist,
             "_earnings_days": float(earn_days)
         }
@@ -454,8 +469,8 @@ def rag_color(col, val):
         return RAG_GREEN if v > 0.05 else RAG_AMBER if v >= -0.05 else RAG_RED
     if col in ("1D", "1W", "1M", "6M", "Gain/Loss", "Daily Change"):
         return RAG_GREEN if v > 0 else RAG_AMBER if v > -5 else RAG_RED
-    if col == "ATH%":
-        return RAG_GREEN if v >= -15 else RAG_AMBER if v >= -25 else RAG_RED
+    if col in ("52W%", "ATH%"):
+        return RAG_GREEN if v >= -15 else RAG_AMBER if v >= -30 else RAG_RED
     if col == "Earn":
         return RAG_NONE if v >= 999 else RAG_GREEN if v > 14 else RAG_AMBER if v > 3 else RAG_RED
 
@@ -472,6 +487,7 @@ RAG_MAP = {
     "1W": "_trend_1w",
     "1M": "_trend_1m",
     "6M": "_trend_6m",
+    "52W%": "_52w",
     "ATH%": "_ath",
     "Earn": "_earnings_days"
 }
@@ -525,6 +541,7 @@ def apply_snapshot_change_styles(hist_display, hist_numeric):
         "1W": "_trend_1w",
         "1M": "_trend_1m",
         "6M": "_trend_6m",
+        "52W%": "_52w",
         "ATH%": "_ath"
     }
 
@@ -608,6 +625,7 @@ def show_snapshot_analysis(current_tickers):
         "1W Trend": "_trend_1w",
         "1M Trend": "_trend_1m",
         "6M Trend": "_trend_6m",
+        "52W Distance": "_52w",
         "ATH Distance": "_ath"
     }
 
@@ -633,7 +651,7 @@ def show_snapshot_analysis(current_tickers):
     display_cols = [
         "Snapshot_Date", "Ticker", "Price", "Gain/Loss", "Daily Change", "Flag",
         "BBPos", "BW%", "Accel", "RSI", "RVOL", "MACD",
-        "Earn", "1D", "1W", "1M", "6M", "ATH%"
+        "Earn", "1D", "1W", "1M", "6M", "52W%", "ATH%"
     ]
 
     existing_display_cols = [col for col in display_cols if col in hist.columns]
@@ -874,6 +892,8 @@ elif app_mode == "My Portfolio":
                     "Price (Now)": f"${curr['Price']:.2f}",
                     "MACD (Now)": curr["MACD"],
                     "RSI (Now)": curr["RSI"],
+                    "52W%": curr["52W%"],
+                    "ATH%": curr["ATH%"],
                     "Entry Price": f"${float(base['Price']):.2f}",
                     "Date Added": base["Baseline_Date"]
                 })
@@ -896,6 +916,7 @@ elif app_mode == "My Portfolio":
                     "1W": curr["1W"],
                     "1M": curr["1M"],
                     "6M": curr["6M"],
+                    "52W%": curr["52W%"],
                     "ATH%": curr["ATH%"],
                     "_bbpos": curr["_bbpos"],
                     "_bw": curr["_bw"],
@@ -907,6 +928,7 @@ elif app_mode == "My Portfolio":
                     "_trend_1w": curr["_trend_1w"],
                     "_trend_1m": curr["_trend_1m"],
                     "_trend_6m": curr["_trend_6m"],
+                    "_52w": curr["_52w"],
                     "_ath": curr["_ath"],
                     "_earnings_days": curr["_earnings_days"],
                     "Entry_Price": float(base["Price"]),
