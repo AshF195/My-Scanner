@@ -1,41 +1,41 @@
 Ticker,Company
-AC-PA.PA,Accor
-AI-PA.PA,Air Liquide
-AIR-PA.PA,Airbus
+AC.PA,Accor
+AI.PA,Air Liquide
+AIR.PA,Airbus
 MT-AS.PA,ArcelorMittal
-CS-PA.PA,Axa
-BNP-PA.PA,BNP Paribas
-EN-PA.PA,Bouygues
-BVI-PA.PA,Bureau Veritas
-CAP-PA.PA,Capgemini
-CA-PA.PA,Carrefour
-ACA-PA.PA,Crédit Agricole
-BN-PA.PA,Danone
-DSY-PA.PA,Dassault Systèmes
-EDEN-PA.PA,Edenred
-ENGI-PA.PA,Engie
-EL-PA.PA,EssilorLuxottica
-ERF-PA.PA,Eurofins Scientific
-RMS-PA.PA,Hermès
-KER-PA.PA,Kering
-OR-PA.PA,L'Oréal
-LR-PA.PA,Legrand
-MC-PA.PA,LVMH
-ML-PA.PA,Michelin
-ORA-PA.PA,Orange
-RI-PA.PA,Pernod Ricard
-PUB-PA.PA,Publicis
-RNO-PA.PA,Renault
-SAF-PA.PA,Safran
-SGO-PA.PA,Saint-Gobain
-SAN-PA.PA,Sanofi
-SU-PA.PA,Schneider Electric
-GLE-PA.PA,Société Générale
-STLAP-PA.PA,Stellantis
-STMPA-PA.PA,STMicroelectronics
-TEP-PA.PA,Teleperformance
-HO-PA.PA,Thales
-TTE-PA.PA,TotalEnergies
-URW-PA.PA,Unibail-Rodamco-Westfield
-VIE-PA.PA,Veolia
-DG-PA.PA,Vinci
+CS.PA,Axa
+BNP.PA,BNP Paribas
+EN.PA,Bouygues
+BVI.PA,Bureau Veritas
+CAP.PA,Capgemini
+CA.PA,Carrefour
+ACA.PA,Crédit Agricole
+BN.PA,Danone
+DSY.PA,Dassault Systèmes
+EDEN.PA,Edenred
+ENGI.PA,Engie
+EL.PA,EssilorLuxottica
+ERF.PA,Eurofins Scientific
+RMS.PA,Hermès
+KER.PA,Kering
+OR.PA,L'Oréal
+LR.PA,Legrand
+MC.PA,LVMH
+ML.PA,Michelin
+ORA.PA,Orange
+RI.PA,Pernod Ricard
+PUB.PA,Publicis
+RNO.PA,Renault
+SAF.PA,Safran
+SGO.PA,Saint-Gobain
+SAN.PA,Sanofi
+SU.PA,Schneider Electric
+GLE.PA,Société Générale
+STLAP.PA,Stellantis
+STMPA.PA,STMicroelectronics
+TEP.PA,Teleperformance
+HO.PA,Thales
+TTE.PA,TotalEnergies
+URW.PA,Unibail-Rodamco-Westfield
+VIE.PA,Veolia
+DG.PA,Vinci
