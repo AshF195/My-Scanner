@@ -30,6 +30,7 @@ st.title("Breakout Continuation Scanner")
 # ---------------------------------------------------
 
 PORTFOLIO_FILE = "portfolio_db.csv"
+SNAPSHOT_FILE = "portfolio_snapshots.csv"
 
 def load_portfolio():
     if os.path.exists(PORTFOLIO_FILE):
@@ -59,6 +60,20 @@ def save_portfolio():
         df.insert(0, "Ticker", list(portfolio.keys()))
 
     df.to_csv(PORTFOLIO_FILE, index=False)
+
+def save_daily_snapshot(rows):
+    if not rows:
+        return
+
+    df_new = pd.DataFrame(rows)
+
+    if os.path.exists(SNAPSHOT_FILE):
+        df_old = pd.read_csv(SNAPSHOT_FILE)
+        df_all = pd.concat([df_old, df_new], ignore_index=True)
+    else:
+        df_all = df_new
+
+    df_all.to_csv(SNAPSHOT_FILE, index=False)
 
 if "portfolio" not in st.session_state:
     st.session_state["portfolio"] = load_portfolio()
@@ -568,6 +583,7 @@ elif app_mode == "My Portfolio":
 
     else:
         port_data = []
+        snapshot_rows = []
         prog_p = st.progress(0)
         tickers = list(st.session_state["portfolio"].keys())
 
@@ -596,6 +612,40 @@ elif app_mode == "My Portfolio":
                     "Date Added": base["Baseline_Date"]
                 })
 
+                snapshot_rows.append({
+                    "Snapshot_Date": datetime.now().strftime("%Y-%m-%d"),
+                    "Ticker": ticker,
+                    "Price": curr["Price"],
+                    "Gain/Loss": change,
+                    "Flag": status,
+                    "BBPos": curr["BBPos"],
+                    "BW%": curr["BW%"],
+                    "Accel": curr["Accel"],
+                    "RSI": curr["RSI"],
+                    "RVOL": curr["RVOL"],
+                    "MACD": curr["MACD"],
+                    "Earn": curr["Earn"],
+                    "1D": curr["1D"],
+                    "1W": curr["1W"],
+                    "1M": curr["1M"],
+                    "6M": curr["6M"],
+                    "ATH%": curr["ATH%"],
+                    "_bbpos": curr["_bbpos"],
+                    "_bw": curr["_bw"],
+                    "_accel": curr["_accel"],
+                    "_rsi": curr["_rsi"],
+                    "_rvol": curr["_rvol"],
+                    "_macd": curr["_macd"],
+                    "_trend_1d": curr["_trend_1d"],
+                    "_trend_1w": curr["_trend_1w"],
+                    "_trend_1m": curr["_trend_1m"],
+                    "_trend_6m": curr["_trend_6m"],
+                    "_ath": curr["_ath"],
+                    "_earnings_days": curr["_earnings_days"],
+                    "Entry_Price": base["Price"],
+                    "Baseline_Date": base["Baseline_Date"]
+                })
+
             prog_p.progress((i + 1) / len(tickers))
 
         if port_data:
@@ -606,6 +656,10 @@ elif app_mode == "My Portfolio":
                 use_container_width=True,
                 hide_index=True
             )
+
+            if st.button("Save Daily Snapshot"):
+                save_daily_snapshot(snapshot_rows)
+                st.success(f"Saved daily snapshot for {len(snapshot_rows)} tickers.")
 
             st.divider()
 
