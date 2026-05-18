@@ -109,6 +109,86 @@ def save_daily_snapshot(rows):
 
     df_all.to_csv(SNAPSHOT_FILE, index=False)
 
+def load_snapshot_history():
+    if not os.path.exists(SNAPSHOT_FILE):
+        return pd.DataFrame()
+
+    df = pd.read_csv(SNAPSHOT_FILE)
+
+    if "Snapshot_Date" not in df.columns or "Ticker" not in df.columns:
+        return pd.DataFrame()
+
+    df["Snapshot_Date"] = pd.to_datetime(df["Snapshot_Date"], errors="coerce")
+    df = df.dropna(subset=["Snapshot_Date", "Ticker"])
+
+    return df.sort_values(["Ticker", "Snapshot_Date"])
+
+def make_snapshot_numeric(df):
+    numeric_cols = [
+        "Price", "Gain/Loss",
+        "_bbpos", "_bw", "_accel", "_rsi", "_rvol", "_macd",
+        "_trend_1d", "_trend_1w", "_trend_1m", "_trend_6m",
+        "_ath", "_earnings_days"
+    ]
+
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    return df
+
+def find_pre_drop_changes(hist, drop_threshold_pct):
+    hist = hist.sort_values("Snapshot_Date").copy()
+    hist = make_snapshot_numeric(hist)
+
+    rows = []
+
+    metrics = {
+        "RSI": "_rsi",
+        "RVOL": "_rvol",
+        "MACD": "_macd",
+        "BBPos": "_bbpos",
+        "Bandwidth": "_bw",
+        "Accel": "_accel",
+        "1D Trend": "_trend_1d",
+        "1W Trend": "_trend_1w",
+        "1M Trend": "_trend_1m",
+        "6M Trend": "_trend_6m",
+        "ATH Distance": "_ath"
+    }
+
+    for i in range(1, len(hist) - 1):
+        prev_row = hist.iloc[i - 1]
+        before_drop = hist.iloc[i]
+        after_drop = hist.iloc[i + 1]
+
+        if pd.isna(before_drop["Price"]) or pd.isna(after_drop["Price"]):
+            continue
+
+        next_price_change = ((after_drop["Price"] / before_drop["Price"]) - 1) * 100
+
+        if next_price_change <= -abs(drop_threshold_pct):
+            row = {
+                "Date Before Drop": before_drop["Snapshot_Date"].strftime("%Y-%m-%d"),
+                "Drop Date": after_drop["Snapshot_Date"].strftime("%Y-%m-%d"),
+                "Price Before": round(before_drop["Price"], 2),
+                "Price After": round(after_drop["Price"], 2),
+                "Next Drop %": round(next_price_change, 2)
+            }
+
+            for label, col in metrics.items():
+                if col in hist.columns:
+                    current_val = before_drop[col]
+                    previous_val = prev_row[col]
+
+                    if pd.notna(current_val) and pd.notna(previous_val):
+                        row[f"{label} Before"] = round(current_val, 3)
+                        row[f"{label} Change"] = round(current_val - previous_val, 3)
+
+            rows.append(row)
+
+    return pd.DataFrame(rows)
+
 def read_file_bytes(path):
     if not os.path.exists(path):
         return None
@@ -523,6 +603,124 @@ def apply_rag_styles(df_full):
     return df_disp.style.apply(lambda col: style_df[col.name], axis=0)
 
 # ---------------------------------------------------
+# SNAPSHOT ANALYSIS UI
+# ---------------------------------------------------
+
+def show_snapshot_analysis(current_tickers):
+    snapshots = load_snapshot_history()
+
+    if snapshots.empty:
+        st.info("No snapshot history yet. Press Save Daily Snapshot over a few days to build trend data.")
+        return
+
+    snapshots = make_snapshot_numeric(snapshots)
+
+    available_tickers = sorted(snapshots["Ticker"].dropna().unique().tolist())
+
+    if not available_tickers:
+        st.info("No ticker history found in the snapshots file.")
+        return
+
+    selected_ticker = st.selectbox(
+        "Analyse ticker history:",
+        available_tickers,
+        index=0
+    )
+
+    hist = snapshots[snapshots["Ticker"] == selected_ticker].copy()
+    hist = hist.sort_values("Snapshot_Date")
+
+    hist = (
+        hist.groupby("Snapshot_Date", as_index=False)
+        .last()
+        .sort_values("Snapshot_Date")
+    )
+
+    if len(hist) < 2:
+        st.info("This ticker needs at least two snapshot dates before trend analysis is useful.")
+        return
+
+    st.subheader(f"Snapshot Trend: {selected_ticker}")
+
+    price_chart = hist.set_index("Snapshot_Date")[["Price"]].dropna()
+    st.line_chart(price_chart)
+
+    metric_options = {
+        "Gain/Loss": "Gain/Loss",
+        "RSI": "_rsi",
+        "RVOL": "_rvol",
+        "MACD": "_macd",
+        "BBPos": "_bbpos",
+        "Bandwidth": "_bw",
+        "Accel": "_accel",
+        "1D Trend": "_trend_1d",
+        "1W Trend": "_trend_1w",
+        "1M Trend": "_trend_1m",
+        "6M Trend": "_trend_6m",
+        "ATH Distance": "_ath"
+    }
+
+    selected_metrics = st.multiselect(
+        "Metrics to chart:",
+        options=list(metric_options.keys()),
+        default=["Gain/Loss", "RSI", "RVOL", "MACD", "Accel"]
+    )
+
+    chart_cols = [
+        metric_options[name]
+        for name in selected_metrics
+        if metric_options[name] in hist.columns
+    ]
+
+    if chart_cols:
+        metric_chart = hist.set_index("Snapshot_Date")[chart_cols].dropna(how="all")
+        metric_chart = metric_chart.rename(
+            columns={v: k for k, v in metric_options.items()}
+        )
+        st.line_chart(metric_chart)
+
+    latest = hist.iloc[-1]
+    previous = hist.iloc[-2]
+
+    summary_rows = []
+
+    for label, col in metric_options.items():
+        if col in hist.columns:
+            latest_val = latest[col]
+            previous_val = previous[col]
+
+            if pd.notna(latest_val) and pd.notna(previous_val):
+                summary_rows.append({
+                    "Metric": label,
+                    "Previous": round(previous_val, 3),
+                    "Latest": round(latest_val, 3),
+                    "Change": round(latest_val - previous_val, 3)
+                })
+
+    if summary_rows:
+        st.subheader("Latest Snapshot Changes")
+        st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+
+    st.subheader("Pre-Drop Pattern Check")
+
+    drop_threshold = st.slider(
+        "Flag price drops of at least:",
+        min_value=1.0,
+        max_value=15.0,
+        value=3.0,
+        step=0.5,
+        format="%.1f%%"
+    )
+
+    drop_analysis = find_pre_drop_changes(hist, drop_threshold)
+
+    if drop_analysis.empty:
+        st.info(f"No {drop_threshold:.1f}%+ price drops found in this ticker's snapshot history yet.")
+    else:
+        st.write("These rows show what the metrics looked like immediately before a later price drop.")
+        st.dataframe(drop_analysis, use_container_width=True, hide_index=True)
+
+# ---------------------------------------------------
 # APP MODES
 # ---------------------------------------------------
 
@@ -759,6 +957,9 @@ elif app_mode == "My Portfolio":
             if st.button("Save Daily Snapshot"):
                 save_daily_snapshot(snapshot_rows)
                 st.success(f"Saved daily snapshot for {len(snapshot_rows)} tickers.")
+
+            st.divider()
+            show_snapshot_analysis(tickers)
 
             st.divider()
 
