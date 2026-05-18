@@ -126,6 +126,7 @@ def find_pre_drop_changes(hist, drop_threshold_pct):
         "BBPos": "_bbpos",
         "Bandwidth": "_bw",
         "Accel": "_accel",
+        "Daily Change": "Daily Change",
         "1D Trend": "_trend_1d",
         "1W Trend": "_trend_1w",
         "1M Trend": "_trend_1m",
@@ -451,7 +452,7 @@ def rag_color(col, val):
         return RAG_GREEN if v > 1.5 else RAG_AMBER if v >= 1.0 else RAG_RED
     if col == "MACD":
         return RAG_GREEN if v > 0.05 else RAG_AMBER if v >= -0.05 else RAG_RED
-    if col in ("1D", "1W", "1M", "6M", "Gain/Loss"):
+    if col in ("1D", "1W", "1M", "6M", "Gain/Loss", "Daily Change"):
         return RAG_GREEN if v > 0 else RAG_AMBER if v > -5 else RAG_RED
     if col == "ATH%":
         return RAG_GREEN if v >= -15 else RAG_AMBER if v >= -25 else RAG_RED
@@ -488,11 +489,14 @@ def apply_rag_styles(df_full):
     if "Gain/Loss" in df_full.columns:
         existing_map["Gain/Loss"] = "Gain/Loss"
 
+    if "Daily Change" in df_full.columns:
+        existing_map["Daily Change"] = "Daily Change"
+
     df_disp = df_full.drop(
         columns=[
             v
             for v in existing_map.values()
-            if v in df_full.columns and v not in ("Flag", "Gain/Loss")
+            if v in df_full.columns and v not in ("Flag", "Gain/Loss", "Daily Change")
         ]
     )
 
@@ -510,6 +514,7 @@ def apply_snapshot_change_styles(hist_display, hist_numeric):
     change_map = {
         "Price": "Price",
         "Gain/Loss": "Gain/Loss",
+        "Daily Change": "Daily Change",
         "BBPos": "_bbpos",
         "BW%": "_bw",
         "Accel": "_accel",
@@ -530,17 +535,19 @@ def apply_snapshot_change_styles(hist_display, hist_numeric):
         values = pd.to_numeric(hist_numeric[numeric_col], errors="coerce")
 
         for i in range(len(values)):
+            cell_index = style_df.columns.get_loc(display_col)
+
             if i == 0 or pd.isna(values.iloc[i]) or pd.isna(values.iloc[i - 1]):
-                style_df.iloc[i, style_df.columns.get_loc(display_col)] = RAG_AMBER
+                style_df.iloc[i, cell_index] = RAG_AMBER
             else:
                 diff = values.iloc[i] - values.iloc[i - 1]
 
                 if abs(diff) < 0.0001:
-                    style_df.iloc[i, style_df.columns.get_loc(display_col)] = RAG_AMBER
+                    style_df.iloc[i, cell_index] = RAG_AMBER
                 elif diff > 0:
-                    style_df.iloc[i, style_df.columns.get_loc(display_col)] = RAG_GREEN
+                    style_df.iloc[i, cell_index] = RAG_GREEN
                 else:
-                    style_df.iloc[i, style_df.columns.get_loc(display_col)] = RAG_RED
+                    style_df.iloc[i, cell_index] = RAG_RED
 
     return hist_display.style.apply(lambda col: style_df[col.name], axis=0)
 
@@ -576,6 +583,12 @@ def show_snapshot_analysis(current_tickers):
     if len(hist) < 2:
         st.info("This ticker needs at least two snapshot dates before trend analysis is useful.")
         return
+
+    if "Daily Change" not in hist.columns:
+        hist["Daily Change"] = hist["Price"].pct_change() * 100
+    else:
+        hist["Daily Change"] = pd.to_numeric(hist["Daily Change"], errors="coerce")
+        hist["Daily Change"] = hist["Daily Change"].fillna(hist["Price"].pct_change() * 100)
 
     st.subheader(f"Snapshot Trend: {selected_ticker}")
 
@@ -625,6 +638,7 @@ def show_snapshot_analysis(current_tickers):
 
     existing_display_cols = [col for col in display_cols if col in hist.columns]
     hist_display = hist[existing_display_cols].copy()
+
     hist_display["Snapshot_Date"] = hist_display["Snapshot_Date"].dt.strftime("%Y-%m-%d")
 
     if "Price" in hist_display.columns:
@@ -856,6 +870,7 @@ elif app_mode == "My Portfolio":
                     "Ticker": ticker,
                     "Flag": status,
                     "Gain/Loss": f"{change:.2f}%",
+                    "Daily Change": f"{curr['_trend_1d']:.2f}%",
                     "Price (Now)": f"${curr['Price']:.2f}",
                     "MACD (Now)": curr["MACD"],
                     "RSI (Now)": curr["RSI"],
