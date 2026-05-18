@@ -1,6 +1,7 @@
 # breakout_scanner.py
 # Streamlit Breakout Continuation Scanner
 # ---------------------------------------
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -25,24 +26,45 @@ st.set_page_config(
 st.title("Breakout Continuation Scanner")
 
 # ---------------------------------------------------
-# PERSISTENCE & PORTFOLIO LOGIC (NEW)
+# PERSISTENCE & PORTFOLIO LOGIC
 # ---------------------------------------------------
+
 PORTFOLIO_FILE = "portfolio_db.csv"
 
-def save_portfolio(p_dict):
-    if p_dict:
-        df = pd.DataFrame.from_dict(p_dict, orient="index")
+def load_portfolio():
+    if os.path.exists(PORTFOLIO_FILE):
+        df = pd.read_csv(PORTFOLIO_FILE)
 
-        # The ticker is already used as the dictionary key,
-        # so remove any duplicate Ticker column before saving.
-        if "Ticker" in df.columns:
-            df = df.drop(columns=["Ticker"])
+        if "Ticker" not in df.columns:
+            return {}
 
-        df.index.name = "Ticker"
-        df.reset_index().to_csv(PORTFOLIO_FILE, index=False)
+        return {
+            row["Ticker"]: row.to_dict()
+            for _, row in df.iterrows()
+        }
 
-    elif os.path.exists(PORTFOLIO_FILE):
-        os.remove(PORTFOLIO_FILE)
+    return {}
+
+def save_portfolio():
+    portfolio = st.session_state.get("portfolio", {})
+
+    if not portfolio:
+        if os.path.exists(PORTFOLIO_FILE):
+            os.remove(PORTFOLIO_FILE)
+        return
+
+    df = pd.DataFrame(portfolio.values())
+
+    if "Ticker" not in df.columns:
+        df.insert(0, "Ticker", list(portfolio.keys()))
+
+    df.to_csv(PORTFOLIO_FILE, index=False)
+
+if "portfolio" not in st.session_state:
+    st.session_state["portfolio"] = load_portfolio()
+
+if "last_results" not in st.session_state:
+    st.session_state["last_results"] = None
 
 # ---------------------------------------------------
 # SESSION STATE & DEFAULT SETTINGS
@@ -67,8 +89,8 @@ for key, val in FILTER_DEFAULTS.items():
 # GITHUB SETTINGS
 # ---------------------------------------------------
 
-GITHUB_USER   = "AshF195"
-GITHUB_REPO   = "My-Scanner"
+GITHUB_USER = "AshF195"
+GITHUB_REPO = "My-Scanner"
 GITHUB_BRANCH = "main"
 
 GITHUB_API = (
@@ -85,10 +107,10 @@ GITHUB_RAW = (
 # RAG COLOUR SCHEME
 # ---------------------------------------------------
 
-RAG_GREEN = "background-color: rgba(0, 200, 80,  0.28)"
-RAG_AMBER = "background-color: rgba(255, 170, 0,  0.28)"
-RAG_RED   = "background-color: rgba(220, 50,  50, 0.28)"
-RAG_NONE  = ""
+RAG_GREEN = "background-color: rgba(0, 200, 80, 0.28)"
+RAG_AMBER = "background-color: rgba(255, 170, 0, 0.28)"
+RAG_RED = "background-color: rgba(220, 50, 50, 0.28)"
+RAG_NONE = ""
 
 # ---------------------------------------------------
 # FETCH & LOAD DATA
@@ -100,7 +122,13 @@ def get_github_csv_files():
         resp = requests.get(GITHUB_API, timeout=10)
         resp.raise_for_status()
         tree = resp.json().get("tree", [])
-        return sorted([i["path"] for i in tree if i["path"].lower().endswith(".csv") and i["type"] == "blob"])
+
+        return sorted([
+            i["path"]
+            for i in tree
+            if i["path"].lower().endswith(".csv") and i["type"] == "blob"
+        ])
+
     except Exception as e:
         st.error(f"GitHub Error: {e}")
         return []
@@ -117,12 +145,18 @@ def load_csv_from_github(path):
 # ---------------------------------------------------
 
 st.sidebar.title("🚀 Navigation")
-app_mode = st.sidebar.radio("View:", ["Scanner", "My Portfolio"])
+
+app_mode = st.sidebar.radio(
+    "View:",
+    ["Scanner", "My Portfolio"],
+    key="app_mode"
+)
 
 st.sidebar.divider()
 st.sidebar.header("Scanner Settings")
 
 all_csv_files = get_github_csv_files()
+
 if not all_csv_files:
     st.stop()
 
@@ -138,16 +172,46 @@ strict_mode = st.sidebar.checkbox("Strict Mode", value=True)
 debug_mode = st.sidebar.checkbox("Debug Mode", value=False)
 
 with st.sidebar.expander("🛠️ Strict Filter Settings"):
-    st.session_state.st_rvol = st.number_input("Min RVOL", value=st.session_state.st_rvol, step=0.1)
-    st.session_state.st_max_rsi = st.number_input("Max RSI", value=st.session_state.st_max_rsi, step=1.0)
-    st.session_state.st_1m_trend = st.number_input("Min 1M Trend %", value=st.session_state.st_1m_trend, step=1.0)
-    st.session_state.st_6m_trend = st.number_input("Min 6M Trend %", value=st.session_state.st_6m_trend, step=1.0)
-    st.session_state.st_ath_dist = st.number_input("Max ATH Distance %", value=st.session_state.st_ath_dist, step=1.0)
-    st.session_state.st_max_bbpos = st.number_input("Max BBPos (if MACD neg)", value=st.session_state.st_max_bbpos, step=0.1)
-    
+    st.session_state.st_rvol = st.number_input(
+        "Min RVOL",
+        value=st.session_state.st_rvol,
+        step=0.1
+    )
+
+    st.session_state.st_max_rsi = st.number_input(
+        "Max RSI",
+        value=st.session_state.st_max_rsi,
+        step=1.0
+    )
+
+    st.session_state.st_1m_trend = st.number_input(
+        "Min 1M Trend %",
+        value=st.session_state.st_1m_trend,
+        step=1.0
+    )
+
+    st.session_state.st_6m_trend = st.number_input(
+        "Min 6M Trend %",
+        value=st.session_state.st_6m_trend,
+        step=1.0
+    )
+
+    st.session_state.st_ath_dist = st.number_input(
+        "Max ATH Distance %",
+        value=st.session_state.st_ath_dist,
+        step=1.0
+    )
+
+    st.session_state.st_max_bbpos = st.number_input(
+        "Max BBPos (if MACD neg)",
+        value=st.session_state.st_max_bbpos,
+        step=0.1
+    )
+
     if st.button("Restore Defaults"):
         for key, val in FILTER_DEFAULTS.items():
             st.session_state[key] = val
+
         st.rerun()
 
 # ---------------------------------------------------
@@ -157,40 +221,64 @@ with st.sidebar.expander("🛠️ Strict Filter Settings"):
 def get_earnings(stock):
     try:
         ed = stock.earnings_dates
+
         if ed is not None and not ed.empty:
             tz = ed.index.tz
             now_tz = pd.Timestamp.now(tz=tz) if tz else pd.Timestamp.now()
             future = ed[ed.index > now_tz]
+
             if not future.empty:
                 next_date = future.index.min().date()
                 days = (next_date - datetime.now().date()).days
                 return f"{next_date} ({days}d)", days
-    except: pass
+
+    except:
+        pass
+
     try:
         cal = stock.calendar
+
         if isinstance(cal, dict) and "Earnings Date" in cal:
             next_date = pd.to_datetime(cal["Earnings Date"][0]).date()
             days = (next_date - datetime.now().date()).days
             return f"{next_date} ({days}d)", days
-    except: pass
+
+    except:
+        pass
+
     return "N/A", 999
 
 def calculate_metrics(ticker):
     try:
         stock = yf.Ticker(ticker)
-        hist  = stock.history(period="1y", auto_adjust=True)
-        if len(hist) < 150: return None
+        hist = stock.history(period="1y", auto_adjust=True)
 
-        close, volume = hist["Close"], hist["Volume"]
+        if len(hist) < 150:
+            return None
+
+        close = hist["Close"]
+        volume = hist["Volume"]
         current_price = close.iloc[-1]
 
         bb = BollingerBands(close=close, window=20, window_dev=2)
-        upper, lower, middle = bb.bollinger_hband(), bb.bollinger_lband(), bb.bollinger_mavg()
+
+        upper = bb.bollinger_hband()
+        lower = bb.bollinger_lband()
+        middle = bb.bollinger_mavg()
+
         bbpos = (current_price - lower.iloc[-1]) / (upper.iloc[-1] - lower.iloc[-1])
-        bw_pct = (((upper - lower) / middle) * 100).rank(pct=True).iloc[-1] * 100
+
+        bw_pct = (
+            (((upper - lower) / middle) * 100)
+            .rank(pct=True)
+            .iloc[-1]
+            * 100
+        )
+
         rsi = RSIIndicator(close=close, window=14).rsi().iloc[-1]
+
         rvol = volume.iloc[-2] / volume.iloc[-22:-2].mean()
-        
+
         histo = MACD(close).macd_diff()
         macd_delta = histo.iloc[-1] - histo.iloc[-4]
 
@@ -201,29 +289,56 @@ def calculate_metrics(ticker):
         t1w = ((current_price / close.iloc[-5]) - 1) * 100
         t1m = ((current_price / close.iloc[-21]) - 1) * 100
         t6m = ((current_price / close.iloc[-126]) - 1) * 100
+
         ath_dist = ((current_price / close.max()) - 1) * 100
 
         earn_disp, earn_days = get_earnings(stock)
 
         if strict_mode:
             reason = None
-            if macd_delta < 0: reason = f"MACD neg ({macd_delta:.3f})"
-            elif rvol < st.session_state.st_rvol: reason = f"RVOL < {st.session_state.st_rvol}"
-            elif t1m < st.session_state.st_1m_trend: reason = f"1M Trend < {st.session_state.st_1m_trend}%"
-            elif t6m < st.session_state.st_6m_trend: reason = f"6M Trend < {st.session_state.st_6m_trend}%"
-            elif ath_dist < st.session_state.st_ath_dist: reason = f"ATH Dist < {st.session_state.st_ath_dist}%"
-            elif rsi > st.session_state.st_max_rsi: reason = f"RSI > {st.session_state.st_max_rsi}"
-            elif bbpos > st.session_state.st_max_bbpos and macd_delta < 0: reason = "Ext BBPos + Neg MACD"
+
+            if macd_delta < 0:
+                reason = f"MACD neg ({macd_delta:.3f})"
+            elif rvol < st.session_state.st_rvol:
+                reason = f"RVOL < {st.session_state.st_rvol}"
+            elif t1m < st.session_state.st_1m_trend:
+                reason = f"1M Trend < {st.session_state.st_1m_trend}%"
+            elif t6m < st.session_state.st_6m_trend:
+                reason = f"6M Trend < {st.session_state.st_6m_trend}%"
+            elif ath_dist < st.session_state.st_ath_dist:
+                reason = f"ATH Dist < {st.session_state.st_ath_dist}%"
+            elif rsi > st.session_state.st_max_rsi:
+                reason = f"RSI > {st.session_state.st_max_rsi}"
+            elif bbpos > st.session_state.st_max_bbpos and macd_delta < 0:
+                reason = "Ext BBPos + Neg MACD"
+
             if reason:
-                if debug_mode: return {"_debug": True, "Ticker": ticker, "Filtered By": reason}
+                if debug_mode:
+                    return {
+                        "_debug": True,
+                        "Ticker": ticker,
+                        "Filtered By": reason
+                    }
+
                 return None
 
-        def bb_lbl(x): return "EXT" if x > 1.1 else "PUSH" if x > 0.8 else "WEAK" if x < 0.2 else "MID"
-        def bw_lbl(x): return "CLIMAX" if x > 90 else "EXP" if x > 70 else "SQUEEZE" if x < 20 else "NORMAL"
-        def ac_lbl(x): return "EXPLODE" if x > 4 else "SURGE" if x > 2 else "FAST" if x > 1 else "PUSH" if x > 0 else "SLOW"
-        def rs_lbl(x): return "EUPH" if x > 80 else "HOT" if x > 70 else "STR" if x > 55 else "MID"
-        def rv_lbl(x): return "EXT" if x > 5 else "HIGH" if x > 3 else "ACT" if x > 1.5 else "LOW"
-        def ma_lbl(x): return "UP STR" if x > 0.3 else "UP BUILD" if x > 0.05 else "FLAT" if x > -0.05 else "DN WEAK" if x > -0.2 else "DN FAIL"
+        def bb_lbl(x):
+            return "EXT" if x > 1.1 else "PUSH" if x > 0.8 else "WEAK" if x < 0.2 else "MID"
+
+        def bw_lbl(x):
+            return "CLIMAX" if x > 90 else "EXP" if x > 70 else "SQUEEZE" if x < 20 else "NORMAL"
+
+        def ac_lbl(x):
+            return "EXPLODE" if x > 4 else "SURGE" if x > 2 else "FAST" if x > 1 else "PUSH" if x > 0 else "SLOW"
+
+        def rs_lbl(x):
+            return "EUPH" if x > 80 else "HOT" if x > 70 else "STR" if x > 55 else "MID"
+
+        def rv_lbl(x):
+            return "EXT" if x > 5 else "HIGH" if x > 3 else "ACT" if x > 1.5 else "LOW"
+
+        def ma_lbl(x):
+            return "UP STR" if x > 0.3 else "UP BUILD" if x > 0.05 else "FLAT" if x > -0.05 else "DN WEAK" if x > -0.2 else "DN FAIL"
 
         return {
             "Ticker": ticker,
@@ -235,51 +350,120 @@ def calculate_metrics(ticker):
             "RVOL": f"{rvol:.2f} {rv_lbl(rvol)}",
             "MACD": ma_lbl(macd_delta),
             "Earn": earn_disp,
-            "1D": f"{t1d:.1f}%", "1W": f"{t1w:.1f}%", "1M": f"{t1m:.1f}%", "6M": f"{t6m:.1f}%", "ATH%": f"{ath_dist:.1f}%",
-            "_bbpos": bbpos, "_bw": bw_pct, "_accel": accel_z, "_rsi": rsi, "_rvol": rvol, "_macd": macd_delta,
-            "_trend_1d": t1d, "_trend_1w": t1w, "_trend_1m": t1m, "_trend_6m": t6m, "_ath": ath_dist, "_earnings_days": float(earn_days)
+            "1D": f"{t1d:.1f}%",
+            "1W": f"{t1w:.1f}%",
+            "1M": f"{t1m:.1f}%",
+            "6M": f"{t6m:.1f}%",
+            "ATH%": f"{ath_dist:.1f}%",
+            "_bbpos": bbpos,
+            "_bw": bw_pct,
+            "_accel": accel_z,
+            "_rsi": rsi,
+            "_rvol": rvol,
+            "_macd": macd_delta,
+            "_trend_1d": t1d,
+            "_trend_1w": t1w,
+            "_trend_1m": t1m,
+            "_trend_6m": t6m,
+            "_ath": ath_dist,
+            "_earnings_days": float(earn_days)
         }
-    except: return None
+
+    except:
+        return None
 
 # ---------------------------------------------------
 # RAG COLOUR LOGIC
 # ---------------------------------------------------
 
 def rag_color(col, val):
-    try: 
-        if isinstance(val, str) and "%" in val: v = float(val.replace("%",""))
-        else: v = float(val)
-    except: 
-        if "🟢" in str(val): return RAG_GREEN
-        if "🟡" in str(val): return RAG_AMBER
-        if "🔴" in str(val): return RAG_RED
+    try:
+        if isinstance(val, str) and "%" in val:
+            v = float(val.replace("%", ""))
+        else:
+            v = float(val)
+
+    except:
+        if "🟢" in str(val):
+            return RAG_GREEN
+        if "🟡" in str(val):
+            return RAG_AMBER
+        if "🔴" in str(val):
+            return RAG_RED
+
         return RAG_NONE
-    if col == "BBPos": return RAG_GREEN if 0.6 <= v <= 1.0 else RAG_AMBER if (0.4 <= v < 0.6 or 1.0 < v <= 1.1) else RAG_RED
-    if col == "BW%": return RAG_RED if v > 90 else RAG_AMBER if v > 80 else RAG_GREEN if v >= 25 else RAG_AMBER
-    if col == "Accel": return RAG_GREEN if 1.0 <= v <= 4.0 else RAG_AMBER if 0.0 <= v < 1.0 else RAG_RED
-    if col == "RSI": return RAG_GREEN if 55 <= v <= 80 else RAG_AMBER if 80 < v <= 85 else RAG_RED
-    if col == "RVOL": return RAG_GREEN if v > 1.5 else RAG_AMBER if v >= 1.0 else RAG_RED
-    if col == "MACD": return RAG_GREEN if v > 0.05 else RAG_AMBER if v >= -0.05 else RAG_RED
-    if col in ("1D", "1W", "1M", "6M", "Gain/Loss"): return RAG_GREEN if v > 0 else RAG_AMBER if v > -5 else RAG_RED
-    if col == "ATH%": return RAG_GREEN if v >= -15 else RAG_AMBER if v >= -25 else RAG_RED
-    if col == "Earn": return RAG_NONE if v >= 999 else RAG_GREEN if v > 14 else RAG_AMBER if v > 3 else RAG_RED
+
+    if col == "BBPos":
+        return RAG_GREEN if 0.6 <= v <= 1.0 else RAG_AMBER if (0.4 <= v < 0.6 or 1.0 < v <= 1.1) else RAG_RED
+
+    if col == "BW%":
+        return RAG_RED if v > 90 else RAG_AMBER if v > 80 else RAG_GREEN if v >= 25 else RAG_AMBER
+
+    if col == "Accel":
+        return RAG_GREEN if 1.0 <= v <= 4.0 else RAG_AMBER if 0.0 <= v < 1.0 else RAG_RED
+
+    if col == "RSI":
+        return RAG_GREEN if 55 <= v <= 80 else RAG_AMBER if 80 < v <= 85 else RAG_RED
+
+    if col == "RVOL":
+        return RAG_GREEN if v > 1.5 else RAG_AMBER if v >= 1.0 else RAG_RED
+
+    if col == "MACD":
+        return RAG_GREEN if v > 0.05 else RAG_AMBER if v >= -0.05 else RAG_RED
+
+    if col in ("1D", "1W", "1M", "6M", "Gain/Loss"):
+        return RAG_GREEN if v > 0 else RAG_AMBER if v > -5 else RAG_RED
+
+    if col == "ATH%":
+        return RAG_GREEN if v >= -15 else RAG_AMBER if v >= -25 else RAG_RED
+
+    if col == "Earn":
+        return RAG_NONE if v >= 999 else RAG_GREEN if v > 14 else RAG_AMBER if v > 3 else RAG_RED
+
     return RAG_NONE
 
-RAG_MAP = {"BBPos": "_bbpos", "BW%": "_bw", "Accel": "_accel", "RSI": "_rsi", "RVOL": "_rvol", "MACD": "_macd", "1D": "_trend_1d", "1W": "_trend_1w", "1M": "_trend_1m", "6M": "_trend_6m", "ATH%": "_ath", "Earn": "_earnings_days"}
+RAG_MAP = {
+    "BBPos": "_bbpos",
+    "BW%": "_bw",
+    "Accel": "_accel",
+    "RSI": "_rsi",
+    "RVOL": "_rvol",
+    "MACD": "_macd",
+    "1D": "_trend_1d",
+    "1W": "_trend_1w",
+    "1M": "_trend_1m",
+    "6M": "_trend_6m",
+    "ATH%": "_ath",
+    "Earn": "_earnings_days"
+}
 
 def apply_rag_styles(df_full):
-    # Filter columns to only those that exist in df_full
-    existing_map = {k: v for k, v in RAG_MAP.items() if k in df_full.columns and v in df_full.columns}
-    # These extra columns are for Portfolio mode
-    if "Flag" in df_full.columns: existing_map["Flag"] = "Flag"
-    if "Gain/Loss" in df_full.columns: existing_map["Gain/Loss"] = "Gain/Loss"
-    
-    df_disp = df_full.drop(columns=[v for v in existing_map.values() if v in df_full.columns and v != "Flag" and v != "Gain/Loss"])
+    existing_map = {
+        k: v
+        for k, v in RAG_MAP.items()
+        if k in df_full.columns and v in df_full.columns
+    }
+
+    if "Flag" in df_full.columns:
+        existing_map["Flag"] = "Flag"
+
+    if "Gain/Loss" in df_full.columns:
+        existing_map["Gain/Loss"] = "Gain/Loss"
+
+    df_disp = df_full.drop(
+        columns=[
+            v
+            for v in existing_map.values()
+            if v in df_full.columns and v not in ("Flag", "Gain/Loss")
+        ]
+    )
+
     style_df = pd.DataFrame("", index=df_disp.index, columns=df_disp.columns)
-    
+
     for disp, num in existing_map.items():
         if disp in df_disp.columns:
             style_df[disp] = df_full[num].apply(lambda v, c=disp: rag_color(c, v))
+
     return df_disp.style.apply(lambda col: style_df[col.name], axis=0)
 
 # ---------------------------------------------------
@@ -292,18 +476,18 @@ if app_mode == "Scanner":
     for market_path in selected_markets:
         try:
             df_market = load_csv_from_github(market_path)
+
             if "Ticker" in df_market.columns:
                 all_tickers.extend(df_market["Ticker"].dropna().tolist()[:max_stocks])
+
         except:
             pass
 
     unique_tickers = list(dict.fromkeys(all_tickers))
 
-    if "last_results" not in st.session_state:
-        st.session_state.last_results = None
-
     if st.button(f"Run Scanner ({len(unique_tickers)} tickers)"):
-        results, debug_results = [], []
+        results = []
+        debug_results = []
 
         progress = st.progress(0)
 
@@ -327,8 +511,9 @@ if app_mode == "Scanner":
             )
 
         if not results:
-            st.session_state.last_results = None
+            st.session_state["last_results"] = None
             st.warning("No stocks passed filters.")
+
         else:
             df = (
                 pd.DataFrame(results)
@@ -336,10 +521,10 @@ if app_mode == "Scanner":
                 .reset_index(drop=True)
             )
 
-            st.session_state.last_results = df
+            st.session_state["last_results"] = df
 
-    if st.session_state.last_results is not None:
-        df = st.session_state.last_results
+    if st.session_state["last_results"] is not None:
+        df = st.session_state["last_results"]
 
         st.subheader("Scanner Results")
 
@@ -361,11 +546,81 @@ if app_mode == "Scanner":
             submitted = st.form_submit_button("Confirm Save to portfolio_db.csv")
 
             if submitted:
+                if "portfolio" not in st.session_state:
+                    st.session_state["portfolio"] = {}
+
                 for t in to_add:
                     snap = df[df["Ticker"] == t].to_dict("records")[0]
+                    snap["Ticker"] = t
                     snap["Baseline_Date"] = datetime.now().strftime("%Y-%m-%d")
-                    st.session_state.portfolio[t] = snap
 
-                save_portfolio(st.session_state.portfolio)
+                    st.session_state["portfolio"][t] = snap
+
+                save_portfolio()
 
                 st.success(f"Saved {len(to_add)} tickers.")
+
+elif app_mode == "My Portfolio":
+    st.header("My Portfolio Tracker")
+
+    if not st.session_state.get("portfolio", {}):
+        st.info("Portfolio is empty. Add stocks from the Scanner.")
+
+    else:
+        port_data = []
+        prog_p = st.progress(0)
+        tickers = list(st.session_state["portfolio"].keys())
+
+        for i, ticker in enumerate(tickers):
+            base = st.session_state["portfolio"][ticker]
+            curr = calculate_metrics(ticker)
+
+            if curr:
+                change = ((curr["Price"] / base["Price"]) - 1) * 100
+
+                if change < -3.0 or curr["_macd"] < -0.05:
+                    status = "🔴 NEGATIVE"
+                elif change > 2.0 and curr["_macd"] > 0.05:
+                    status = "🟢 POSITIVE"
+                else:
+                    status = "🟡 NEUTRAL"
+
+                port_data.append({
+                    "Ticker": ticker,
+                    "Flag": status,
+                    "Gain/Loss": f"{change:.2f}%",
+                    "Price (Now)": f"${curr['Price']:.2f}",
+                    "MACD (Now)": curr["MACD"],
+                    "RSI (Now)": curr["RSI"],
+                    "Entry Price": f"${base['Price']:.2f}",
+                    "Date Added": base["Baseline_Date"]
+                })
+
+            prog_p.progress((i + 1) / len(tickers))
+
+        if port_data:
+            df_port = pd.DataFrame(port_data)
+
+            st.dataframe(
+                apply_rag_styles(df_port),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.divider()
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                rem = st.selectbox("Remove stock:", [""] + tickers)
+
+                if st.button("Delete Ticker") and rem:
+                    del st.session_state["portfolio"][rem]
+                    save_portfolio()
+                    st.rerun()
+
+            with col2:
+                if st.button("Clear All Data"):
+                    st.session_state["portfolio"] = {}
+                    save_portfolio()
+                    st.rerun()
