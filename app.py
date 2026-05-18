@@ -101,7 +101,7 @@ def load_snapshot_history():
 
 def make_snapshot_numeric(df):
     numeric_cols = [
-        "Price", "Gain/Loss",
+        "Price", "Gain/Loss", "Daily Change",
         "_bbpos", "_bw", "_accel", "_rsi", "_rvol", "_macd",
         "_trend_1d", "_trend_1w", "_trend_1m", "_trend_6m",
         "_ath", "_earnings_days"
@@ -584,6 +584,7 @@ def show_snapshot_analysis(current_tickers):
 
     metric_options = {
         "Gain/Loss": "Gain/Loss",
+        "Daily Change": "Daily Change",
         "RSI": "_rsi",
         "RVOL": "_rvol",
         "MACD": "_macd",
@@ -600,7 +601,7 @@ def show_snapshot_analysis(current_tickers):
     selected_metrics = st.multiselect(
         "Metrics to chart:",
         options=list(metric_options.keys()),
-        default=["Gain/Loss", "RSI", "RVOL", "MACD", "Accel"]
+        default=["Gain/Loss", "Daily Change", "RSI", "RVOL", "MACD", "Accel"]
     )
 
     chart_cols = [
@@ -617,7 +618,7 @@ def show_snapshot_analysis(current_tickers):
     st.subheader("Chronological Snapshot Table")
 
     display_cols = [
-        "Snapshot_Date", "Ticker", "Price", "Gain/Loss", "Flag",
+        "Snapshot_Date", "Ticker", "Price", "Gain/Loss", "Daily Change", "Flag",
         "BBPos", "BW%", "Accel", "RSI", "RVOL", "MACD",
         "Earn", "1D", "1W", "1M", "6M", "ATH%"
     ]
@@ -631,6 +632,9 @@ def show_snapshot_analysis(current_tickers):
 
     if "Gain/Loss" in hist_display.columns:
         hist_display["Gain/Loss"] = hist_display["Gain/Loss"].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "")
+
+    if "Daily Change" in hist_display.columns:
+        hist_display["Daily Change"] = hist_display["Daily Change"].apply(lambda x: f"{x:.2f}%" if pd.notna(x) else "")
 
     st.dataframe(
         apply_snapshot_change_styles(hist_display, hist),
@@ -864,6 +868,7 @@ elif app_mode == "My Portfolio":
                     "Ticker": ticker,
                     "Price": curr["Price"],
                     "Gain/Loss": change,
+                    "Daily Change": curr["_trend_1d"],
                     "Flag": status,
                     "BBPos": curr["BBPos"],
                     "BW%": curr["BW%"],
