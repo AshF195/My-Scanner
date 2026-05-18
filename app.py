@@ -29,21 +29,20 @@ st.title("Breakout Continuation Scanner")
 # ---------------------------------------------------
 PORTFOLIO_FILE = "portfolio_db.csv"
 
-def load_portfolio():
-    if os.path.exists(PORTFOLIO_FILE):
-        return pd.read_csv(PORTFOLIO_FILE).set_index("Ticker").to_dict('index')
-    return {}
-
 def save_portfolio(p_dict):
     if p_dict:
-        df = pd.DataFrame.from_dict(p_dict, orient='index')
+        df = pd.DataFrame.from_dict(p_dict, orient="index")
+
+        # The ticker is already used as the dictionary key,
+        # so remove any duplicate Ticker column before saving.
+        if "Ticker" in df.columns:
+            df = df.drop(columns=["Ticker"])
+
         df.index.name = "Ticker"
         df.reset_index().to_csv(PORTFOLIO_FILE, index=False)
+
     elif os.path.exists(PORTFOLIO_FILE):
         os.remove(PORTFOLIO_FILE)
-
-if "portfolio" not in st.session_state:
-    st.session_state.portfolio = load_portfolio()
 
 # ---------------------------------------------------
 # SESSION STATE & DEFAULT SETTINGS
