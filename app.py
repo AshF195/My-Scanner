@@ -32,6 +32,35 @@ st.title("Breakout Continuation Scanner")
 PORTFOLIO_FILE = "portfolio_db.csv"
 SNAPSHOT_FILE = "portfolio_snapshots.csv"
 
+def clean_value(value):
+    if pd.isna(value):
+        return ""
+
+    if isinstance(value, np.generic):
+        return value.item()
+
+    return value
+
+def clean_row(row):
+    return {
+        key: clean_value(value)
+        for key, value in row.items()
+    }
+
+def dataframe_to_portfolio(df):
+    if "Ticker" not in df.columns:
+        return {}
+
+    portfolio = {}
+
+    for _, row in df.iterrows():
+        ticker = str(row["Ticker"]).strip()
+
+        if ticker:
+            portfolio[ticker] = clean_row(row.to_dict())
+
+    return portfolio
+
 def load_portfolio():
     if os.path.exists(PORTFOLIO_FILE):
         df = pd.read_csv(PORTFOLIO_FILE)
@@ -39,10 +68,7 @@ def load_portfolio():
         if "Ticker" not in df.columns:
             return {}
 
-        return {
-            row["Ticker"]: row.to_dict()
-            for _, row in df.iterrows()
-        }
+        return dataframe_to_portfolio(df)
 
     return {}
 
@@ -54,7 +80,12 @@ def save_portfolio():
             os.remove(PORTFOLIO_FILE)
         return
 
-    df = pd.DataFrame(portfolio.values())
+    rows = [
+        clean_row(row)
+        for row in portfolio.values()
+    ]
+
+    df = pd.DataFrame(rows)
 
     if "Ticker" not in df.columns:
         df.insert(0, "Ticker", list(portfolio.keys()))
@@ -65,7 +96,10 @@ def save_daily_snapshot(rows):
     if not rows:
         return
 
-    df_new = pd.DataFrame(rows)
+    df_new = pd.DataFrame([
+        clean_row(row)
+        for row in rows
+    ])
 
     if os.path.exists(SNAPSHOT_FILE):
         df_old = pd.read_csv(SNAPSHOT_FILE)
@@ -74,6 +108,13 @@ def save_daily_snapshot(rows):
         df_all = df_new
 
     df_all.to_csv(SNAPSHOT_FILE, index=False)
+
+def read_file_bytes(path):
+    if not os.path.exists(path):
+        return None
+
+    with open(path, "rb") as f:
+        return f.read()
 
 if "portfolio" not in st.session_state:
     st.session_state["portfolio"] = load_portfolio()
@@ -558,7 +599,7 @@ if app_mode == "Scanner":
                 options=df["Ticker"].tolist()
             )
 
-            submitted = st.form_submit_button("Confirm Save to portfolio_db.csv")
+            submitted = st.form_submit_button("Confirm Save to Portfolio")
 
             if submitted:
                 if "portfolio" not in st.session_state:
@@ -578,6 +619,64 @@ if app_mode == "Scanner":
 elif app_mode == "My Portfolio":
     st.header("My Portfolio Tracker")
 
+    st.subheader("Data Backup")
+
+    col_upload_1, col_upload_2 = st.columns(2)
+
+    with col_upload_1:
+        uploaded_portfolio = st.file_uploader(
+            "Upload portfolio_db.csv",
+            type=["csv"],
+            key="upload_portfolio_csv"
+        )
+
+        if uploaded_portfolio is not None:
+            df_uploaded_portfolio = pd.read_csv(uploaded_portfolio)
+
+            st.session_state["portfolio"] = dataframe_to_portfolio(df_uploaded_portfolio)
+            save_portfolio()
+
+            st.success("Portfolio file uploaded.")
+
+        portfolio_bytes = read_file_bytes(PORTFOLIO_FILE)
+
+        if portfolio_bytes:
+            st.download_button(
+                "Download portfolio_db.csv",
+                data=portfolio_bytes,
+                file_name="portfolio_db.csv",
+                mime="text/csv"
+            )
+        else:
+            st.caption("No portfolio file available yet.")
+
+    with col_upload_2:
+        uploaded_snapshots = st.file_uploader(
+            "Upload portfolio_snapshots.csv",
+            type=["csv"],
+            key="upload_snapshots_csv"
+        )
+
+        if uploaded_snapshots is not None:
+            with open(SNAPSHOT_FILE, "wb") as f:
+                f.write(uploaded_snapshots.getvalue())
+
+            st.success("Snapshots file uploaded.")
+
+        snapshot_bytes = read_file_bytes(SNAPSHOT_FILE)
+
+        if snapshot_bytes:
+            st.download_button(
+                "Download portfolio_snapshots.csv",
+                data=snapshot_bytes,
+                file_name="portfolio_snapshots.csv",
+                mime="text/csv"
+            )
+        else:
+            st.caption("No snapshots file available yet.")
+
+    st.divider()
+
     if not st.session_state.get("portfolio", {}):
         st.info("Portfolio is empty. Add stocks from the Scanner.")
 
@@ -592,7 +691,7 @@ elif app_mode == "My Portfolio":
             curr = calculate_metrics(ticker)
 
             if curr:
-                change = ((curr["Price"] / base["Price"]) - 1) * 100
+                change = ((curr["Price"] / float(base["Price"])) - 1) * 100
 
                 if change < -3.0 or curr["_macd"] < -0.05:
                     status = "🔴 NEGATIVE"
@@ -608,7 +707,7 @@ elif app_mode == "My Portfolio":
                     "Price (Now)": f"${curr['Price']:.2f}",
                     "MACD (Now)": curr["MACD"],
                     "RSI (Now)": curr["RSI"],
-                    "Entry Price": f"${base['Price']:.2f}",
+                    "Entry Price": f"${float(base['Price']):.2f}",
                     "Date Added": base["Baseline_Date"]
                 })
 
@@ -642,7 +741,7 @@ elif app_mode == "My Portfolio":
                     "_trend_6m": curr["_trend_6m"],
                     "_ath": curr["_ath"],
                     "_earnings_days": curr["_earnings_days"],
-                    "Entry_Price": base["Price"],
+                    "Entry_Price": float(base["Price"]),
                     "Baseline_Date": base["Baseline_Date"]
                 })
 
